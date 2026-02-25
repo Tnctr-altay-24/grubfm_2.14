@@ -873,6 +873,12 @@ module = {
 };
 
 module = {
+  name = sbpolicy;
+  efi = commands/efi/sbpolicy.c;
+  enable = efi;
+};
+
+module = {
   name = efitextmode;
   efi = commands/efi/efitextmode.c;
   enable = efi;
