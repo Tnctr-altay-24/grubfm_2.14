@@ -843,6 +843,12 @@ module = {
 };
 
 module = {
+  name = efivar;
+  efi = commands/efi/efivar.c;
+  enable = efi;
+};
+
+module = {
   name = efitextmode;
   efi = commands/efi/efitextmode.c;
   enable = efi;
@@ -1134,17 +1140,17 @@ module = {
 module = {
   name = map;
   efi = map/efi/map.c;
-  common = map/lib/compat_string.c;
   common = map/lib/guid.c;
   common = map/lib/misc.c;
   common = map/lib/vfat.c;
   common = map/lib/vfat_grub.c;
-  common = map/lib/ventoy_stub.c;
+  common = map/lib/ventoy.c;
   common = map/lib/iso.c;
   efi = map/lib/g4d.c;
   efi = map/efi/efivdiskex.c;
   efi = map/efi/blockio.c;
   efi = map/efi/vdisk.c;
+  efi = map/efi/vpart.c;
   efi = map/efi/handle.c;
 
   i386_pc = map/pc/map.c;
@@ -1161,7 +1167,6 @@ module = {
 
 module = {
   name = wimboot;
-  common = map/lib/compat_string.c;
   common = map/wimboot/init.c;
   efi = map/wimboot/efi/boot.c;
   efi = map/wimboot/efi/install.c;
@@ -1192,7 +1197,6 @@ module = {
 
 module = {
   name = ntboot;
-  common = map/lib/compat_string.c;
   common = map/ntboot/ntboot.c;
 
   cflags = '-Wno-strict-aliasing -fshort-wchar ';

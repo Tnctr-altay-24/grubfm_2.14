@@ -46,6 +46,22 @@ static const struct grub_arg_option options[] =
     {0, 0, 0, 0, 0, 0}
   };
 
+static int
+show_hidden_entries_enabled (void)
+{
+  const char *val;
+
+  val = grub_env_get ("grubfm_show_hidden");
+  if (val && val[0] == '1')
+    return 1;
+
+  val = grub_env_get ("grub_show_hidden");
+  if (val && val[0] == '1')
+    return 1;
+
+  return 0;
+}
+
 static struct
 {
   const char *name;
@@ -275,6 +291,9 @@ grub_cmd_menuentry (grub_extcmd_context_t ctxt, int argc, char **args)
   if (! ctxt->state[3].set && ! ctxt->script)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, "no menuentry definition");
 
+  if (ctxt->extcmd->cmd->name[0] == 'h' && !show_hidden_entries_enabled ())
+    return GRUB_ERR_NONE;
+
   if (ctxt->state[1].set)
     users = ctxt->state[1].arg;
   else if (ctxt->state[5].set)
@@ -316,7 +335,56 @@ grub_cmd_menuentry (grub_extcmd_context_t ctxt, int argc, char **args)
   return r;
 }
 
-static grub_extcmd_t cmd, cmd_sub;
+static grub_err_t
+grub_cmd_clear_menu (grub_command_t cmd __attribute__ ((unused)),
+		     int argc __attribute__ ((unused)),
+		     char **args __attribute__ ((unused)))
+{
+  grub_menu_t menu = grub_env_get_menu ();
+  grub_menu_entry_t entry;
+
+  if (!menu)
+    return GRUB_ERR_NONE;
+
+  entry = menu->entry_list;
+  while (entry)
+    {
+      grub_menu_entry_t next_entry = entry->next;
+      grub_size_t i;
+
+      if (entry->classes)
+	{
+	  struct grub_menu_entry_class *class;
+	  for (class = entry->classes; class; class = class->next)
+	    grub_free (class->name);
+	  grub_free (entry->classes);
+	}
+
+      if (entry->args)
+	{
+	  for (i = 0; entry->args[i]; i++)
+	    grub_free (entry->args[i]);
+	  grub_free (entry->args);
+	}
+
+      if (entry->blsuki)
+	entry->blsuki->visible = 0;
+
+      grub_free ((void *) entry->id);
+      grub_free ((void *) entry->users);
+      grub_free ((void *) entry->title);
+      grub_free ((void *) entry->sourcecode);
+      grub_free (entry);
+      entry = next_entry;
+    }
+
+  menu->entry_list = NULL;
+  menu->size = 0;
+  return GRUB_ERR_NONE;
+}
+
+static grub_extcmd_t cmd, cmd_sub, cmd_hidden;
+static grub_command_t cmd_clear;
 
 void
 grub_menu_init (void)
@@ -332,6 +400,14 @@ grub_menu_init (void)
 				  | GRUB_COMMAND_FLAG_EXTRACTOR,
 				  N_("BLOCK"), N_("Define a submenu."),
 				  options);
+  cmd_hidden = grub_register_extcmd ("hiddenentry", grub_cmd_menuentry,
+				     GRUB_COMMAND_FLAG_BLOCKS
+				     | GRUB_COMMAND_ACCEPT_DASH
+				     | GRUB_COMMAND_FLAG_EXTRACTOR,
+				     N_("BLOCK"), N_("Define a hidden menu entry."),
+				     options);
+  cmd_clear = grub_register_command ("clear_menu", grub_cmd_clear_menu, 0,
+				     N_("Clear current menu entries."));
 }
 
 void
@@ -339,4 +415,6 @@ grub_menu_fini (void)
 {
   grub_unregister_extcmd (cmd);
   grub_unregister_extcmd (cmd_sub);
+  grub_unregister_extcmd (cmd_hidden);
+  grub_unregister_command (cmd_clear);
 }

@@ -120,8 +120,6 @@ grub_efivdisk_install (struct grub_efivdisk_data *disk,
   if (state[MAP_ALT].set)
     return alt_install (disk);
 #endif
-  disk->vpart.handle = NULL;
-  disk->vpart.dp = NULL;
   status = efi_call_6 (b->install_multiple_protocol_interfaces,
                        &disk->vdisk.handle, &dp_guid, disk->vdisk.dp,
                        &blk_io_guid, &disk->vdisk.block_io, NULL);
@@ -130,5 +128,12 @@ grub_efivdisk_install (struct grub_efivdisk_data *disk,
     return grub_error (GRUB_ERR_BAD_OS, "Failed to install virtual disk.");
 
   efi_call_4 (b->connect_controller, disk->vdisk.handle, NULL, NULL, TRUE);
+  if (!state[MAP_NB].set)
+    {
+      grub_err_t err = grub_efivpart_install (disk, state);
+      if (err != GRUB_ERR_NONE && err != GRUB_ERR_FILE_NOT_FOUND)
+        return err;
+      grub_errno = GRUB_ERR_NONE;
+    }
   return GRUB_ERR_NONE;
 }

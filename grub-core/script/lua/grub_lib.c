@@ -701,6 +701,10 @@ grub_lua_add_icon_menu (lua_State *state)
 static int
 grub_lua_add_hidden_menu (lua_State *state)
 {
+  const char *show_hidden = grub_env_get ("grubfm_show_hidden");
+  if (!show_hidden || show_hidden[0] != '1')
+    return push_result (state);
+
   int n;
   const char *source;
   source = luaL_checklstring (state, 2, 0);
