@@ -621,43 +621,7 @@ grub_lua_add_menu (lua_State *state)
 static int
 grub_lua_clear_menu (lua_State *state __attribute__ ((unused)))
 {
-  grub_menu_t menu = grub_env_get_menu ();
-  grub_menu_entry_t entry;
-
-  if (!menu)
-    return 0;
-
-  entry = menu->entry_list;
-  while (entry)
-    {
-      grub_menu_entry_t next_entry = entry->next;
-      grub_size_t i;
-
-      if (entry->classes)
-        {
-          struct grub_menu_entry_class *class;
-          for (class = entry->classes; class; class = class->next)
-            grub_free (class->name);
-          grub_free (entry->classes);
-        }
-
-      if (entry->args)
-        {
-          for (i = 0; entry->args[i]; i++)
-            grub_free (entry->args[i]);
-          grub_free (entry->args);
-        }
-
-      grub_free ((void *) entry->id);
-      grub_free ((void *) entry->users);
-      grub_free ((void *) entry->title);
-      grub_free ((void *) entry->sourcecode);
-      grub_free (entry);
-      entry = next_entry;
-    }
-
-  menu->entry_list = NULL;
-  menu->size = 0;
+  grub_normal_clear_menu ();
   return 0;
 }
 
@@ -675,20 +639,36 @@ grub_lua_add_icon_menu (lua_State *state)
     int i;
     char **class = NULL;
     class = grub_malloc (2 * sizeof (class[0]));
+    if (!class)
+      return push_result (state);
     class[0] = grub_strdup (luaL_checklstring (state, 1, 0));
     class[1] = NULL;
     args = grub_malloc (n * sizeof (args[0]));
-    if (!args)
+    if (!args || !class[0])
+    {
+      if (args)
+        grub_free (args);
+      if (class[0])
+        grub_free (class[0]);
+      grub_free (class);
       return push_result (state);
+    }
     for (i = 0; i < n; i++)
       args[i] = luaL_checkstring (state, 3 + i);
 
     p = grub_strdup (source);
     if (! p)
+    {
+      grub_free (class[0]);
+      grub_free (class);
+      grub_free (args);
       return push_result (state);
+    }
     grub_normal_add_menu_entry (n, args, class, NULL, NULL, NULL, NULL, p, 0, NULL);
     grub_free (p);
     grub_free (args);
+    grub_free (class[0]);
+    grub_free (class);
   }
   else
   {
@@ -702,6 +682,8 @@ static int
 grub_lua_add_hidden_menu (lua_State *state)
 {
   const char *show_hidden = grub_env_get ("grubfm_show_hidden");
+  if (!show_hidden || show_hidden[0] != '1')
+    show_hidden = grub_env_get ("grub_show_hidden");
   if (!show_hidden || show_hidden[0] != '1')
     return push_result (state);
 

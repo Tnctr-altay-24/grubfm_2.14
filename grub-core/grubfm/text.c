@@ -24,6 +24,7 @@
 #include <grub/normal.h>
 #include <grub/term.h>
 #include <grub/video.h>
+#include <grub/conv.h>
 #include <grub/gfxmenu_view.h>
 #include <grub/lib/hexdump.h>
 
@@ -92,8 +93,24 @@ grubfm_textcat_page (grub_file_t file,
     {
       if (encoding == ENCODING_GBK)
       {
-        grubfm_gfx_printf (white, 0, y + FONT_SPACE * i,
-                           "%20lld %s", (unsigned long long)(i + from + 1), line);
+        char *buffer = NULL;
+        grub_uint32_t len = grub_strlen (line);
+        grub_uint32_t buf_len;
+
+        buf_len = len * 3 + 1;
+        buffer = (char *) grub_zalloc (buf_len);
+        if (buffer)
+          {
+            gbk_to_utf8 (line, len, &buffer, &buf_len);
+            grubfm_gfx_printf (white, 0, y + FONT_SPACE * i,
+                               "%20lld %s",
+                               (unsigned long long) (i + from + 1), buffer);
+            grub_free (buffer);
+          }
+        else
+          grubfm_gfx_printf (white, 0, y + FONT_SPACE * i,
+                             "%20lld %s",
+                             (unsigned long long) (i + from + 1), line);
       }
       else
       {

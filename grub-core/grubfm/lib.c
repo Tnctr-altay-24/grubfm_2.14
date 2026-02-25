@@ -176,43 +176,7 @@ grubfm_file_exist (const char *fmt, ...)
 void
 grubfm_clear_menu (void)
 {
-  grub_menu_t menu = grub_env_get_menu ();
-  grub_menu_entry_t entry;
-
-  if (!menu)
-    return;
-
-  entry = menu->entry_list;
-  while (entry)
-    {
-      grub_menu_entry_t next_entry = entry->next;
-      grub_size_t i;
-
-      if (entry->classes)
-        {
-          struct grub_menu_entry_class *class;
-          for (class = entry->classes; class; class = class->next)
-            grub_free (class->name);
-          grub_free (entry->classes);
-        }
-
-      if (entry->args)
-        {
-          for (i = 0; entry->args[i]; i++)
-            grub_free (entry->args[i]);
-          grub_free (entry->args);
-        }
-
-      grub_free ((void *) entry->id);
-      grub_free ((void *) entry->users);
-      grub_free ((void *) entry->title);
-      grub_free ((void *) entry->sourcecode);
-      grub_free (entry);
-      entry = next_entry;
-    }
-
-  menu->entry_list = NULL;
-  menu->size = 0;
+  grub_normal_clear_menu ();
 }
 
 static void
@@ -226,6 +190,8 @@ add_menu (const char *title, const char *icon, const char *id,
   if (hidden)
     {
       show_hidden = grub_env_get ("grubfm_show_hidden");
+      if (!show_hidden || show_hidden[0] != '1')
+        show_hidden = grub_env_get ("grub_show_hidden");
       if (!show_hidden || show_hidden[0] != '1')
         return;
     }

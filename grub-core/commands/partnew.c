@@ -36,6 +36,9 @@
 #include <grub/ntfs.h>
 
 #define MAX_MBR_PARTITIONS  4
+#define EXT_SUPERBLOCK_OFF 1024
+#define EXT_SUPERBLOCK_MAGIC_OFF 56
+#define EXT_SUPERBLOCK_MAGIC 0xEF53
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
@@ -175,6 +178,18 @@ bpb_detect (grub_disk_t disk, grub_disk_addr_t part_start)
     bpb.num_hidden_sectors = part_start;
     grub_disk_write (disk, part_start, 0, sizeof (bpb), &bpb);
     return 0x0C;
+  }
+  /* ext2/3/4 superblock magic (0xEF53). */
+  {
+    grub_uint16_t ext_magic = 0;
+    if (!grub_disk_read (disk, part_start,
+                         EXT_SUPERBLOCK_OFF + EXT_SUPERBLOCK_MAGIC_OFF,
+                         sizeof (ext_magic), &ext_magic)
+        && ext_magic == grub_cpu_to_le16_compile_time (EXT_SUPERBLOCK_MAGIC))
+      {
+        grub_dprintf ("partnew", "fs: ext\n");
+        return 0x83;
+      }
   }
   return 0;
 }

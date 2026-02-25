@@ -374,11 +374,18 @@ grub_cmd_clear_menu (grub_command_t cmd __attribute__ ((unused)),
 		     int argc __attribute__ ((unused)),
 		     char **args __attribute__ ((unused)))
 {
+  grub_normal_clear_menu ();
+  return GRUB_ERR_NONE;
+}
+
+void
+grub_normal_clear_menu (void)
+{
   grub_menu_t menu = grub_env_get_menu ();
   grub_menu_entry_t entry;
 
   if (!menu)
-    return GRUB_ERR_NONE;
+    return;
 
   entry = menu->entry_list;
   while (entry)
@@ -414,7 +421,6 @@ grub_cmd_clear_menu (grub_command_t cmd __attribute__ ((unused)),
 
   menu->entry_list = NULL;
   menu->size = 0;
-  return GRUB_ERR_NONE;
 }
 
 static grub_extcmd_t cmd, cmd_sub, cmd_hidden, cmd_pop, cmd_sub_exit;

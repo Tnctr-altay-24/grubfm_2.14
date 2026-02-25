@@ -568,6 +568,284 @@ dump_vendor_path (const char *type, grub_efi_vendor_device_path_t *vendor)
   grub_printf ("]");
 }
 
+static char *
+dp_appendf (char *old, const char *fmt, ...)
+{
+  va_list ap;
+  char *piece;
+  char *res;
+
+  va_start (ap, fmt);
+  piece = grub_xvasprintf (fmt, ap);
+  va_end (ap);
+  if (!piece)
+    {
+      grub_free (old);
+      return NULL;
+    }
+
+  if (!old)
+    return piece;
+
+  res = grub_xasprintf ("%s%s", old, piece);
+  grub_free (old);
+  grub_free (piece);
+  return res;
+}
+
+static char *
+dump_vendor_path_str (const char *type, grub_efi_vendor_device_path_t *vendor)
+{
+  grub_uint32_t vendor_data_len = vendor->header.length - sizeof (*vendor);
+  char *out = grub_xasprintf ("/%sVendor(%pG)[%x: ",
+                              type, &vendor->vendor_guid, vendor_data_len);
+  grub_uint32_t i;
+
+  if (!out)
+    return NULL;
+
+  for (i = 0; i < vendor_data_len; i++)
+    {
+      out = dp_appendf (out, "%02x ", vendor->vendor_defined_data[i]);
+      if (!out)
+        return NULL;
+    }
+
+  out = dp_appendf (out, "]");
+  return out;
+}
+
+char *
+grub_efi_device_path_to_str (grub_efi_device_path_t *dp)
+{
+  char *text_dp = NULL;
+
+  while (GRUB_EFI_DEVICE_PATH_VALID (dp))
+    {
+      grub_efi_uint8_t type = GRUB_EFI_DEVICE_PATH_TYPE (dp);
+      grub_efi_uint8_t subtype = GRUB_EFI_DEVICE_PATH_SUBTYPE (dp);
+      grub_efi_uint16_t len = GRUB_EFI_DEVICE_PATH_LENGTH (dp);
+      char *node = NULL;
+
+      switch (type)
+        {
+        case GRUB_EFI_END_DEVICE_PATH_TYPE:
+          if (subtype == GRUB_EFI_END_ENTIRE_DEVICE_PATH_SUBTYPE)
+            node = grub_xasprintf ("/EndEntire");
+          else if (subtype == GRUB_EFI_END_THIS_DEVICE_PATH_SUBTYPE)
+            node = grub_xasprintf ("/EndThis");
+          else
+            node = grub_xasprintf ("/EndUnknown(%x)", (unsigned) subtype);
+          break;
+
+        case GRUB_EFI_HARDWARE_DEVICE_PATH_TYPE:
+          switch (subtype)
+            {
+            case GRUB_EFI_PCI_DEVICE_PATH_SUBTYPE:
+              {
+                grub_efi_pci_device_path_t *pci = (grub_efi_pci_device_path_t *) dp;
+                node = grub_xasprintf ("/PCI(%x,%x)",
+                                       (unsigned) pci->function,
+                                       (unsigned) pci->device);
+              }
+              break;
+            case GRUB_EFI_PCCARD_DEVICE_PATH_SUBTYPE:
+              {
+                grub_efi_pccard_device_path_t *pccard = (grub_efi_pccard_device_path_t *) dp;
+                node = grub_xasprintf ("/PCCARD(%x)", (unsigned) pccard->function);
+              }
+              break;
+            case GRUB_EFI_MEMORY_MAPPED_DEVICE_PATH_SUBTYPE:
+              {
+                grub_efi_memory_mapped_device_path_t *mmapped =
+                  (grub_efi_memory_mapped_device_path_t *) dp;
+                node = grub_xasprintf ("/MMap(%x,%llx,%llx)",
+                                       (unsigned) mmapped->memory_type,
+                                       (unsigned long long) mmapped->start_address,
+                                       (unsigned long long) mmapped->end_address);
+              }
+              break;
+            case GRUB_EFI_VENDOR_DEVICE_PATH_SUBTYPE:
+              node = dump_vendor_path_str ("Hardware",
+                                           (grub_efi_vendor_device_path_t *) dp);
+              break;
+            case GRUB_EFI_CONTROLLER_DEVICE_PATH_SUBTYPE:
+              {
+                grub_efi_controller_device_path_t *controller =
+                  (grub_efi_controller_device_path_t *) dp;
+                node = grub_xasprintf ("/Ctrl(%x)",
+                                       (unsigned) controller->controller_number);
+              }
+              break;
+            default:
+              node = grub_xasprintf ("/UnknownHW(%x)", (unsigned) subtype);
+              break;
+            }
+          break;
+
+        case GRUB_EFI_ACPI_DEVICE_PATH_TYPE:
+          switch (subtype)
+            {
+            case GRUB_EFI_ACPI_DEVICE_PATH_SUBTYPE:
+              {
+                grub_efi_acpi_device_path_t *acpi = (grub_efi_acpi_device_path_t *) dp;
+                node = grub_xasprintf ("/ACPI(%x,%x)",
+                                       (unsigned) acpi->hid, (unsigned) acpi->uid);
+              }
+              break;
+            case GRUB_EFI_EXPANDED_ACPI_DEVICE_PATH_SUBTYPE:
+              {
+                grub_efi_expanded_acpi_device_path_t *eacpi =
+                  (grub_efi_expanded_acpi_device_path_t *) dp;
+                node = grub_xasprintf ("/ACPI(%x,%x,%x)",
+                                       (unsigned) eacpi->hid,
+                                       (unsigned) eacpi->uid,
+                                       (unsigned) eacpi->cid);
+              }
+              break;
+            default:
+              node = grub_xasprintf ("/UnknownACPI(%x)", (unsigned) subtype);
+              break;
+            }
+          break;
+
+        case GRUB_EFI_MESSAGING_DEVICE_PATH_TYPE:
+          switch (subtype)
+            {
+            case GRUB_EFI_USB_DEVICE_PATH_SUBTYPE:
+              {
+                grub_efi_usb_device_path_t *usb = (grub_efi_usb_device_path_t *) dp;
+                node = grub_xasprintf ("/USB(%x,%x)",
+                                       (unsigned) usb->parent_port_number,
+                                       (unsigned) usb->usb_interface);
+              }
+              break;
+            case GRUB_EFI_SATA_DEVICE_PATH_SUBTYPE:
+              {
+                grub_efi_sata_device_path_t *sata = (grub_efi_sata_device_path_t *) dp;
+                node = grub_xasprintf ("/Sata(%x,%x,%x)",
+                                       sata->hba_port, sata->multiplier_port, sata->lun);
+              }
+              break;
+            case GRUB_EFI_VLAN_DEVICE_PATH_SUBTYPE:
+              {
+                grub_efi_vlan_device_path_t *vlan = (grub_efi_vlan_device_path_t *) dp;
+                node = grub_xasprintf ("/Vlan(%u)", vlan->vlan_id);
+              }
+              break;
+            case GRUB_EFI_VENDOR_MESSAGING_DEVICE_PATH_SUBTYPE:
+              node = dump_vendor_path_str ("Messaging",
+                                           (grub_efi_vendor_device_path_t *) dp);
+              break;
+            default:
+              node = grub_xasprintf ("/UnknownMessaging(%x)", (unsigned) subtype);
+              break;
+            }
+          break;
+
+        case GRUB_EFI_MEDIA_DEVICE_PATH_TYPE:
+          switch (subtype)
+            {
+            case GRUB_EFI_HARD_DRIVE_DEVICE_PATH_SUBTYPE:
+              {
+                grub_efi_hard_drive_device_path_t *hd =
+                  (grub_efi_hard_drive_device_path_t *) dp;
+                node = grub_xasprintf ("/HD(%u,%llx,%llx,%x,%x)",
+                                       hd->partition_number,
+                                       (unsigned long long) hd->partition_start,
+                                       (unsigned long long) hd->partition_size,
+                                       (unsigned) hd->partmap_type,
+                                       (unsigned) hd->signature_type);
+              }
+              break;
+            case GRUB_EFI_CDROM_DEVICE_PATH_SUBTYPE:
+              {
+                grub_efi_cdrom_device_path_t *cd = (grub_efi_cdrom_device_path_t *) dp;
+                node = grub_xasprintf ("/CD(%u,%llx,%llx)",
+                                       cd->boot_entry,
+                                       (unsigned long long) cd->partition_start,
+                                       (unsigned long long) cd->partition_size);
+              }
+              break;
+            case GRUB_EFI_VENDOR_MEDIA_DEVICE_PATH_SUBTYPE:
+              node = dump_vendor_path_str ("Media",
+                                           (grub_efi_vendor_device_path_t *) dp);
+              break;
+            case GRUB_EFI_FILE_PATH_DEVICE_PATH_SUBTYPE:
+              {
+                grub_efi_file_path_device_path_t *fp = (grub_efi_file_path_device_path_t *) dp;
+                grub_uint8_t *buf = grub_zalloc ((len - 4) * 2 + 1);
+
+                if (buf)
+                  {
+                    grub_efi_char16_t *dup_name = grub_zalloc (len - 4);
+                    if (dup_name)
+                      {
+                        *grub_utf16_to_utf8 (buf,
+                                             grub_memcpy (dup_name, fp->path_name, len - 4),
+                                             (len - 4) / sizeof (grub_efi_char16_t))
+                          = '\0';
+                        grub_free (dup_name);
+                      }
+                  }
+                node = grub_xasprintf ("/File(%s)", buf ? (char *) buf : "(null)");
+                grub_free (buf);
+              }
+              break;
+            case GRUB_EFI_PROTOCOL_DEVICE_PATH_SUBTYPE:
+              {
+                grub_efi_protocol_device_path_t *proto =
+                  (grub_efi_protocol_device_path_t *) dp;
+                node = grub_xasprintf ("/Protocol(%pG)", &proto->guid);
+              }
+              break;
+            default:
+              node = grub_xasprintf ("/UnknownMedia(%x)", (unsigned) subtype);
+              break;
+            }
+          break;
+
+        case GRUB_EFI_BIOS_DEVICE_PATH_TYPE:
+          if (subtype == GRUB_EFI_BIOS_DEVICE_PATH_SUBTYPE)
+            {
+              grub_efi_bios_device_path_t *bios = (grub_efi_bios_device_path_t *) dp;
+              node = grub_xasprintf ("/BIOS(%x,%x,%s)",
+                                     (unsigned) bios->device_type,
+                                     (unsigned) bios->status_flags,
+                                     (char *) (dp + 1));
+            }
+          else
+            node = grub_xasprintf ("/UnknownBIOS(%x)", (unsigned) subtype);
+          break;
+
+        default:
+          node = grub_xasprintf ("/UnknownType(%x,%x)",
+                                 (unsigned) type, (unsigned) subtype);
+          break;
+        }
+
+      if (!node)
+        {
+          grub_free (text_dp);
+          return NULL;
+        }
+
+      text_dp = dp_appendf (text_dp, "%s", node);
+      grub_free (node);
+      if (!text_dp)
+        return NULL;
+
+      if (GRUB_EFI_END_ENTIRE_DEVICE_PATH (dp))
+        break;
+
+      dp = (grub_efi_device_path_t *) ((char *) dp + len);
+    }
+
+  if (!text_dp)
+    text_dp = grub_strdup ("");
+  return text_dp;
+}
+
 
 /* Print the chain of Device Path nodes. This is mainly for debugging. */
 void

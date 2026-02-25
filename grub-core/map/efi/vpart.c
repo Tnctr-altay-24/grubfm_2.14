@@ -31,11 +31,9 @@
 
 #define EFI_PARTITION   0xef
 
-static const grub_uint8_t gpt_hdr_magic[8] =
-  { 'E', 'F', 'I', ' ', 'P', 'A', 'R', 'T' };
-static const grub_packed_guid_t gpt_efi_system_part_guid =
-  { 0xC12A7328, 0xF81F, 0x11D2,
-    { 0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B } };
+static const grub_uint8_t gpt_hdr_magic[8] = GRUB_GPT_HEADER_MAGIC;
+static const grub_gpt_part_guid_t gpt_efi_system_part_guid =
+  GRUB_GPT_PARTITION_TYPE_EFI_SYSTEM;
 
 static grub_efi_device_path_t *
 fill_mbr_dp (grub_efivdisk_t *vpart, grub_off_t *size)
@@ -89,7 +87,7 @@ fill_gpt_dp (grub_efivdisk_t *vpart, grub_off_t *size)
   grub_uint64_t gpt_entry_pos;
   grub_uint64_t part_addr;
   grub_uint64_t part_size;
-  grub_packed_guid_t gpt_part_signature;
+  grub_gpt_part_guid_t gpt_part_signature;
   grub_uint32_t part_num = 0;
   grub_efi_device_path_t *tmp_dp;
   grub_uint32_t i;
@@ -113,12 +111,11 @@ fill_gpt_dp (grub_efivdisk_t *vpart, grub_off_t *size)
   {
     file_read (vpart->file, gpt_entry, gpt_entry_size,
                gpt_entry_pos + i * gpt_entry_size);
-    if (grub_guidcmp ((grub_packed_guid_t *) &gpt_entry->type,
-                      &gpt_efi_system_part_guid))
+    if (grub_guidcmp (&gpt_entry->type, &gpt_efi_system_part_guid))
     {
       part_addr = gpt_entry->start;
       part_size = gpt_entry->end - gpt_entry->start;
-      grub_guidcpy (&gpt_part_signature, (grub_packed_guid_t *) &gpt_entry->guid);
+      grub_guidcpy (&gpt_part_signature, &gpt_entry->guid);
       part_num = i + 1;
       break;
     }

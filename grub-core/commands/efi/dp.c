@@ -14,8 +14,10 @@
 #include <grub/file.h>
 #include <grub/i18n.h>
 #include <grub/charset.h>
+#include <grub/lua.h>
 #include <grub/misc.h>
 #include <grub/mm.h>
+#include <grub/procfs.h>
 #include <grub/types.h>
 #include <grub/usbdesc.h>
 
@@ -435,16 +437,146 @@ grub_cmd_usb (grub_extcmd_context_t ctxt __attribute__ ((unused)),
 
 static grub_extcmd_t cmd_dp, cmd_usb;
 
+static int
+lua_efi_vendor (lua_State *state)
+{
+  char *vendor;
+  grub_uint16_t *vendor16;
+  grub_uint16_t *fv = grub_efi_system_table->firmware_vendor;
+
+  for (vendor16 = fv; *vendor16; vendor16++)
+    ;
+
+  vendor = grub_malloc (4 * (vendor16 - fv + 1));
+  if (!vendor)
+    return 0;
+
+  *grub_utf16_to_utf8 ((grub_uint8_t *) vendor, fv, vendor16 - fv) = 0;
+  lua_pushstring (state, vendor);
+  grub_free (vendor);
+  return 1;
+}
+
+static int
+lua_efi_version (lua_State *state)
+{
+  char uefi_ver[11];
+  grub_efi_uint16_t uefi_major_rev = grub_efi_system_table->hdr.revision >> 16;
+  grub_efi_uint16_t uefi_minor_rev = grub_efi_system_table->hdr.revision & 0xffff;
+  grub_efi_uint8_t uefi_minor_1 = uefi_minor_rev / 10;
+  grub_efi_uint8_t uefi_minor_2 = uefi_minor_rev % 10;
+
+  grub_snprintf (uefi_ver, sizeof (uefi_ver), "%d.%d",
+                 uefi_major_rev, uefi_minor_1);
+  if (uefi_minor_2)
+    grub_snprintf (uefi_ver, sizeof (uefi_ver), "%s.%d",
+                   uefi_ver, uefi_minor_2);
+
+  lua_pushstring (state, uefi_ver);
+  return 1;
+}
+
+static int
+lua_efi_getdp (lua_State *state)
+{
+  grub_disk_t disk;
+  grub_efi_handle_t handle = 0;
+  grub_efi_device_path_t *dp = NULL;
+
+  luaL_checktype (state, 1, LUA_TLIGHTUSERDATA);
+  disk = lua_touserdata (state, 1);
+  handle = grub_efidisk_get_device_handle (disk);
+  if (!handle)
+    return 0;
+
+  dp = grub_efi_get_device_path (handle);
+  if (!dp)
+    return 0;
+
+  lua_pushlightuserdata (state, dp);
+  return 1;
+}
+
+static int
+lua_efi_dptostr (lua_State *state)
+{
+  grub_efi_device_path_t *dp;
+  char *str = NULL;
+
+  luaL_checktype (state, 1, LUA_TLIGHTUSERDATA);
+  dp = lua_touserdata (state, 1);
+  if (!dp)
+    return 0;
+
+  str = grub_efi_device_path_to_str (dp);
+  if (!str)
+    return 0;
+
+  lua_pushstring (state, str);
+  grub_free (str);
+  return 1;
+}
+
+static luaL_Reg efilib[] =
+{
+  {"vendor", lua_efi_vendor},
+  {"version", lua_efi_version},
+  {"getdp", lua_efi_getdp},
+  {"dptostr", lua_efi_dptostr},
+  {0, 0}
+};
+
+struct systab_info
+{
+  char magic[8];
+  char arch[8];
+  grub_uint64_t systab;
+  grub_uint64_t handle;
+};
+
+static char *
+get_systab (grub_size_t *sz)
+{
+  struct systab_info *ret;
+
+  *sz = sizeof (struct systab_info);
+  ret = grub_zalloc (*sz);
+  if (!ret)
+    return NULL;
+
+  grub_strncpy (ret->magic, "GRUB EFI", sizeof (ret->magic));
+  grub_strncpy (ret->arch, GRUB_TARGET_CPU, sizeof (ret->arch));
+  ret->systab = (grub_addr_t) grub_efi_system_table;
+  ret->handle = (grub_addr_t) grub_efi_image_handle;
+  return (char *) ret;
+}
+
+static struct grub_procfs_entry proc_systab =
+{
+  .name = "systab",
+  .get_contents = get_systab,
+};
+
 GRUB_MOD_INIT (dp)
 {
   cmd_dp = grub_register_extcmd ("dp", grub_cmd_dp, 0, N_("[DEVICE]"),
 				 N_("Print UEFI DevicePath."), 0);
   cmd_usb = grub_register_extcmd ("efiusb", grub_cmd_usb, 0, N_("DEVICE"),
 				  N_("Print USB information."), 0);
+
+  if (grub_lua_global_state)
+    {
+      lua_gc (grub_lua_global_state, LUA_GCSTOP, 0);
+      luaL_register (grub_lua_global_state, "efi", efilib);
+      lua_gc (grub_lua_global_state, LUA_GCRESTART, 0);
+    }
+
+  grub_procfs_register ("systab", &proc_systab);
 }
 
 GRUB_MOD_FINI (dp)
 {
   grub_unregister_extcmd (cmd_dp);
   grub_unregister_extcmd (cmd_usb);
+  grub_procfs_unregister (&proc_systab);
 }

@@ -70,10 +70,42 @@ grub_efiloader_boot (void)
 }
 
 static void
-unmap_efidisk (grub_disk_t disk __attribute__ ((unused)))
+unmap_efidisk (grub_disk_t disk)
 {
-  grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
-              "unmap efidisk is not supported by efivdiskex");
+  grub_efi_handle_t handle;
+  grub_efi_device_path_t *device_path = NULL;
+  grub_efi_block_io_t *block_io = NULL;
+  grub_efi_boot_services_t *b = grub_efi_system_table->boot_services;
+  grub_efi_status_t status;
+
+  if (!disk)
+    return;
+
+  handle = grub_efidisk_get_device_handle (disk);
+  if (!handle)
+    {
+      grub_error (GRUB_ERR_BAD_DEVICE, "failed to resolve efidisk handle");
+      return;
+    }
+
+  status = efi_call_3 (b->handle_protocol, handle, (grub_efi_guid_t *) &dp_guid,
+                       (void **) &device_path);
+  if (status != GRUB_EFI_SUCCESS || !device_path)
+    {
+      grub_error (GRUB_ERR_BAD_DEVICE, "failed to query device path protocol");
+      return;
+    }
+
+  status = efi_call_3 (b->handle_protocol, handle, (grub_efi_guid_t *) &blk_io_guid,
+                       (void **) &block_io);
+  if (status != GRUB_EFI_SUCCESS || !block_io)
+    {
+      grub_error (GRUB_ERR_BAD_DEVICE, "failed to query block io protocol");
+      return;
+    }
+
+  efi_call_6 (b->uninstall_multiple_protocol_interfaces,
+              handle, &dp_guid, device_path, &blk_io_guid, block_io, NULL);
 }
 
 static void
