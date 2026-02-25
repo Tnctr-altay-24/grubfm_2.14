@@ -282,3 +282,8 @@ widthspec.bin
 /xzcompress_test
 /zfs_test
 /zfs_zstd_test
+
+/po
+/.cache
+/build
+compile_commands.json

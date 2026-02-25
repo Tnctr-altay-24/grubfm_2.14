@@ -1068,6 +1068,65 @@ module = {
 };
 
 module = {
+  name = lua;
+  common = script/lua/lapi.c;
+  common = script/lua/lauxlib.c;
+  common = script/lua/lbaselib.c;
+  common = script/lua/lcode.c;
+  common = script/lua/ldebug.c;
+  common = script/lua/ldo.c;
+  common = script/lua/ldump.c;
+  common = script/lua/lfunc.c;
+  common = script/lua/lgc.c;
+  common = script/lua/linit.c;
+  common = script/lua/llex.c;
+  common = script/lua/lmem.c;
+  common = script/lua/loadlib.c;
+  common = script/lua/lobject.c;
+  common = script/lua/lopcodes.c;
+  common = script/lua/loslib.c;
+  common = script/lua/lparser.c;
+  common = script/lua/lstate.c;
+  common = script/lua/lstring.c;
+  common = script/lua/lstrlib.c;
+  common = script/lua/ltable.c;
+  common = script/lua/ltablib.c;
+  common = script/lua/ltm.c;
+  common = script/lua/lundump.c;
+  common = script/lua/lvm.c;
+  common = script/lua/lzio.c;
+
+  common = script/lua/grub_main.c;
+  common = script/lua/grub_lib.c;
+
+  cflags = '$(CFLAGS_POSIX)';
+  cppflags = '$(CPPFLAGS_POSIX) -DGRUB_LUA';
+};
+
+module = {
+  name = ini;
+  common = script/ini/ini.c;
+  common = script/ini/main.c;
+  cflags = '$(CFLAGS_POSIX)';
+  cppflags = '$(CPPFLAGS_POSIX)';
+};
+
+module = {
+  name = grubfm;
+  common = grubfm/fm.c;
+  common = grubfm/lib.c;
+  common = grubfm/list.c;
+  common = grubfm/type.c;
+  common = grubfm/open.c;
+  common = grubfm/hex.c;
+  common = grubfm/text.c;
+  cppflags = '-I$(srcdir)/script/ini';
+  enable = efi;
+  enable = i386_pc;
+  enable = i386_multiboot;
+};
+
+module = {
   name = memrw;
   common = commands/memrw.c;
 };
