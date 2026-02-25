@@ -855,6 +855,12 @@ module = {
 };
 
 module = {
+  name = fixmmap;
+  efi = commands/efi/fixmmap.c;
+  enable = efi;
+};
+
+module = {
   name = setup_var;
   efi = commands/efi/setup_var.c;
   enable = efi;
@@ -863,6 +869,25 @@ module = {
 module = {
   name = efiload;
   efi = commands/efi/efiload.c;
+  enable = efi;
+};
+
+module = {
+  name = getargs;
+  efi = commands/efi/getargs.c;
+  enable = efi;
+};
+
+module = {
+  name = shell;
+  efi = commands/efi/shell.c;
+  enable = i386_efi;
+  enable = x86_64_efi;
+};
+
+module = {
+  name = wpbt;
+  efi = commands/efi/wpbt.c;
   enable = efi;
 };
 
@@ -882,6 +907,11 @@ module = {
   name = efitextmode;
   efi = commands/efi/efitextmode.c;
   enable = efi;
+};
+
+module = {
+  name = alias;
+  common = commands/alias.c;
 };
 
 module = {
@@ -1290,6 +1320,11 @@ module = {
 };
 
 module = {
+  name = increment;
+  common = commands/increment.c;
+};
+
+module = {
   name = search;
   common = commands/search_wrap.c;
   extra_dist = commands/search.c;
@@ -1328,8 +1363,43 @@ module = {
 };
 
 module = {
+  name = gptrepair;
+  common = commands/gptrepair.c;
+};
+
+module = {
+  name = gptprio;
+  common = commands/gptprio.c;
+};
+
+module = {
   name = sleep;
   common = commands/sleep.c;
+};
+
+module = {
+  name = getkey;
+  common = commands/getkey.c;
+};
+
+module = {
+  name = uuid;
+  common = commands/uuid.c;
+};
+
+module = {
+  name = partnew;
+  common = commands/partnew.c;
+};
+
+module = {
+  name = nttools;
+  common = commands/nttools.c;
+};
+
+module = {
+  name = setkey;
+  common = term/setkey.c;
 };
 
 module = {
@@ -2770,6 +2840,11 @@ module = {
 module = {
   name = crc64;
   common = lib/crc64.c;
+};
+
+module = {
+  name = gpt;
+  common = lib/gpt.c;
 };
 
 module = {

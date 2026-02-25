@@ -133,14 +133,14 @@ get_targets_string (void)
 }
 
 static int
-print_gpt_guid (grub_guid_t guid)
+print_gpt_guid (grub_packed_guid_t guid)
 {
-  guid.data1 = grub_le_to_cpu32 (guid.data1);
-  guid.data2 = grub_le_to_cpu16 (guid.data2);
-  guid.data3 = grub_le_to_cpu16 (guid.data3);
+  grub_uint32_t data1 = grub_le_to_cpu32 (guid.data1);
+  grub_uint16_t data2 = grub_le_to_cpu16 (guid.data2);
+  grub_uint16_t data3 = grub_le_to_cpu16 (guid.data3);
 
   return grub_printf ("%08x-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-		      guid.data1, guid.data2, guid.data3, guid.data4[0],
+		      data1, data2, data3, guid.data4[0],
 		      guid.data4[1], guid.data4[2], guid.data4[3],
 		      guid.data4[4], guid.data4[5], guid.data4[6],
 		      guid.data4[7]);

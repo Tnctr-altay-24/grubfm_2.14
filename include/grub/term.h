@@ -242,6 +242,7 @@ extern struct grub_term_output *EXPORT_VAR(grub_term_outputs_disabled);
 extern struct grub_term_input *EXPORT_VAR(grub_term_inputs_disabled);
 extern struct grub_term_output *EXPORT_VAR(grub_term_outputs);
 extern struct grub_term_input *EXPORT_VAR(grub_term_inputs);
+extern int (*EXPORT_VAR(grub_key_remap)) (int key);
 
 static inline void
 grub_term_register_input (const char *name __attribute__ ((unused)),

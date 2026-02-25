@@ -201,7 +201,7 @@ bcd_patch_dp (struct bcd_patch_data *cmd)
         grub_disk_close (disk);
         return grub_errno;
       }
-    grub_memcpy (cmd->dp.diskid, gpt_hdr.guid, 16);
+    grub_memcpy (cmd->dp.diskid, &gpt_hdr.guid, 16);
     grub_memcpy (cmd->dp.partid, &entry.guid, 16);
   }
   else

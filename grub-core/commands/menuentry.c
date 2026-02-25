@@ -24,6 +24,7 @@
 #include <grub/extcmd.h>
 #include <grub/i18n.h>
 #include <grub/normal.h>
+#include <grub/env_private.h>
 
 static const struct grub_arg_option options[] =
   {
@@ -336,6 +337,39 @@ grub_cmd_menuentry (grub_extcmd_context_t ctxt, int argc, char **args)
 }
 
 static grub_err_t
+grub_cmd_pop_env (grub_extcmd_context_t ctxt __attribute__ ((unused)),
+		  int argc, char **args)
+{
+  while (argc)
+    {
+      struct grub_env_context *cc = grub_current_context;
+      const char *value = grub_env_get (args[0]);
+      if (value)
+	{
+	  grub_current_context = grub_current_context->prev;
+	  while (grub_current_context && grub_env_get (args[0]))
+	    {
+	      grub_env_set (args[0], value);
+	      grub_current_context = grub_current_context->prev;
+	    }
+	  grub_current_context = cc;
+	}
+      argc--;
+      args++;
+    }
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
+grub_cmd_submenu_exit (grub_extcmd_context_t ctxt __attribute__ ((unused)),
+		       int argc __attribute__ ((unused)),
+		       char **args __attribute__ ((unused)))
+{
+  grub_normal_exit_level = -1;
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
 grub_cmd_clear_menu (grub_command_t cmd __attribute__ ((unused)),
 		     int argc __attribute__ ((unused)),
 		     char **args __attribute__ ((unused)))
@@ -383,7 +417,7 @@ grub_cmd_clear_menu (grub_command_t cmd __attribute__ ((unused)),
   return GRUB_ERR_NONE;
 }
 
-static grub_extcmd_t cmd, cmd_sub, cmd_hidden;
+static grub_extcmd_t cmd, cmd_sub, cmd_hidden, cmd_pop, cmd_sub_exit;
 static grub_command_t cmd_clear;
 
 void
@@ -406,6 +440,11 @@ grub_menu_init (void)
 				     | GRUB_COMMAND_FLAG_EXTRACTOR,
 				     N_("BLOCK"), N_("Define a hidden menu entry."),
 				     options);
+  cmd_pop = grub_register_extcmd ("pop_env", grub_cmd_pop_env, 0,
+				  N_("variable_name [...]"),
+				  N_("Pass variable value to parent contexts."), 0);
+  cmd_sub_exit = grub_register_extcmd ("submenu_exit", grub_cmd_submenu_exit, 0,
+				       0, N_("Exit from current submenu."), 0);
   cmd_clear = grub_register_command ("clear_menu", grub_cmd_clear_menu, 0,
 				     N_("Clear current menu entries."));
 }
@@ -416,5 +455,7 @@ grub_menu_fini (void)
   grub_unregister_extcmd (cmd);
   grub_unregister_extcmd (cmd_sub);
   grub_unregister_extcmd (cmd_hidden);
+  grub_unregister_extcmd (cmd_pop);
+  grub_unregister_extcmd (cmd_sub_exit);
   grub_unregister_command (cmd_clear);
 }

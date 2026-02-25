@@ -34,6 +34,7 @@ grub_uint8_t grub_term_highlight_color = GRUB_TERM_DEFAULT_HIGHLIGHT_COLOR;
 
 void (*grub_term_poll_usb) (int wait_for_completion) = NULL;
 void (*grub_net_poll_cards_idle) (void) = NULL;
+int (*grub_key_remap) (int key) = NULL;
 
 /* Put a Unicode character.  */
 static void
@@ -97,6 +98,8 @@ grub_getkey_noblock (void)
   FOR_ACTIVE_TERM_INPUTS(term)
   {
     int key = term->getkey (term);
+    if (key != GRUB_TERM_NO_KEY && grub_key_remap)
+      key = grub_key_remap (key);
     if (key != GRUB_TERM_NO_KEY)
       return key;
   }
