@@ -38,6 +38,13 @@
 #include <grub/script_sh.h>
 #include <grub/lua.h>
 
+static int
+grub_lua_is_memfile (const char *name)
+{
+  return name && (grub_strncmp (name, "mem:", 4) == 0
+                  || grub_strncmp (name, "(mem)", 5) == 0);
+}
+
 /* Updates the globals grub_errno and grub_msg, leaving their values on the 
    top of the stack, and clears grub_errno. When grub_errno is zero, grub_msg
    is not left on the stack. The value returned is the number of values left on
@@ -340,8 +347,13 @@ grub_lua_file_open (lua_State *state)
   if (! file)
     return 0;
 
-  if (flag && grub_strchr (flag, 'w'))
-    grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET, "write mode is not supported");
+  if (flag && grub_strchr (flag, 'w') && !grub_lua_is_memfile (file->name))
+    {
+      grub_file_close (file);
+      grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
+                  "write mode only supports mem: files");
+      return 0;
+    }
 
   lua_pushlightuserdata (state, file);
   return 1;
@@ -412,11 +424,41 @@ grub_lua_file_read (lua_State *state)
 static int
 grub_lua_file_write (lua_State *state)
 {
+  grub_file_t file;
+  const char *buf;
+  size_t len;
+  grub_off_t writable;
+
   luaL_checktype (state, 1, LUA_TLIGHTUSERDATA);
-  (void) lua_touserdata (state, 1);
-  (void) lua_tolstring (state, 2, 0);
-  grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET, "file_write is not supported");
-  return push_result (state);
+  file = lua_touserdata (state, 1);
+  buf = luaL_checklstring (state, 2, &len);
+
+  if (!grub_lua_is_memfile (file->name))
+    {
+      grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
+                  "file_write only supports mem: files");
+      return push_result (state);
+    }
+
+  if (file->offset > file->size)
+    {
+      grub_error (GRUB_ERR_OUT_OF_RANGE, "file offset out of range");
+      return push_result (state);
+    }
+
+  writable = file->size - file->offset;
+  if ((grub_off_t) len > writable)
+    len = (size_t) writable;
+
+  if (len > 0)
+    {
+      grub_memcpy ((grub_uint8_t *) file->data + file->offset, buf, len);
+      file->offset += len;
+    }
+
+  save_errno (state);
+  lua_pushinteger (state, (lua_Integer) len);
+  return 1;
 }
 
 static int
