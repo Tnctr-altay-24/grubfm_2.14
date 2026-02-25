@@ -22,12 +22,20 @@
 #include <grub/extcmd.h>
 #include <grub/env.h>
 #include <grub/i18n.h>
-#include <grub/lockdown.h>
+#include <grub/file.h>
+#ifdef GRUB_MACHINE_EFI
+#include <grub/efi/api.h>
+#include <grub/efi/efi.h>
+#else
+#include <grub/relocator.h>
+#endif
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
 static grub_extcmd_t cmd_read_byte, cmd_read_word, cmd_read_dword;
 static grub_command_t cmd_write_byte, cmd_write_word, cmd_write_dword;
+static grub_command_t cmd_write_bytes;
+static grub_extcmd_t cmd_loadfile;
 
 static const struct grub_arg_option options[] =
   {
@@ -119,35 +127,179 @@ grub_cmd_write (grub_command_t cmd, int argc, char **argv)
   return 0;
 }
 
+static grub_err_t
+grub_cmd_write_bytes (grub_command_t cmd __attribute__ ((unused)),
+		      int argc, char **argv)
+{
+  grub_addr_t addr;
+  int i;
+
+  if (argc < 2)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT,
+		       N_("at least two arguments expected"));
+
+  addr = grub_strtoul (argv[0], 0, 0);
+  for (i = 1; i < argc; i++)
+    {
+      grub_uint32_t value = grub_strtoul (argv[i], 0, 0) & 0xff;
+      *((volatile grub_uint8_t *) (addr + (i - 1))) = (grub_uint8_t) value;
+    }
+
+  return 0;
+}
+
+static const struct grub_arg_option options_loadfile[] =
+  {
+    {"skip", 'k', 0, N_("Skip N bytes from file."), N_("N"), ARG_TYPE_INT},
+    {"length", 'l', 0, N_("Read only N bytes."), N_("N"), ARG_TYPE_INT},
+    {"addr", 'a', 0, N_("Specify memory address."), N_("ADDR"), ARG_TYPE_INT},
+    {"nodecompress", 'n', 0, N_("Don't decompress the file."), 0, 0},
+    {"set", 's', 0, N_("Store loaded memfile path into variable VARNAME."),
+     N_("VARNAME"), ARG_TYPE_STRING},
+    {0, 0, 0, 0, 0, 0}
+  };
+
+enum options_loadfile
+  {
+    LOADFILE_SKIP,
+    LOADFILE_LENGTH,
+    LOADFILE_ADDR,
+    LOADFILE_NODECOMPRESS,
+    LOADFILE_SET
+  };
+
+static grub_err_t
+grub_cmd_loadfile (grub_extcmd_context_t ctxt, int argc, char **argv)
+{
+  struct grub_arg_list *state = ctxt->state;
+  grub_file_t file = NULL;
+  enum grub_file_type type = GRUB_FILE_TYPE_LOOPBACK;
+  grub_uint64_t skip = 0, size, len;
+  grub_ssize_t nread;
+  char mempath[96];
+  void *data = NULL;
+
+  if (argc != 1)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("file name required"));
+
+  if (state[LOADFILE_SKIP].set)
+    skip = grub_strtoull (state[LOADFILE_SKIP].arg, NULL, 0);
+  if (state[LOADFILE_NODECOMPRESS].set)
+    type |= GRUB_FILE_TYPE_NO_DECOMPRESS;
+
+  file = grub_file_open (argv[0], type);
+  if (!file)
+    return grub_errno;
+
+  size = grub_file_size (file);
+  if (skip >= size)
+    {
+      grub_error (GRUB_ERR_BAD_ARGUMENT, N_("skip is out of file range"));
+      goto fail;
+    }
+
+  if (state[LOADFILE_LENGTH].set)
+    len = grub_strtoull (state[LOADFILE_LENGTH].arg, NULL, 0);
+  else
+    len = size - skip;
+
+  if (skip + len > size)
+    len = size - skip;
+
+  if (state[LOADFILE_ADDR].set)
+    {
+#ifdef GRUB_MACHINE_EFI
+      data = grub_efi_allocate_fixed ((grub_efi_physical_address_t)
+				      grub_strtoull (state[LOADFILE_ADDR].arg,
+						     0, 0),
+				      (grub_efi_uintn_t)
+				      ((len + ((1 << 12) - 1)) >> 12));
+#else
+      struct grub_relocator *rel = NULL;
+      grub_relocator_chunk_t ch;
+
+      rel = grub_relocator_new ();
+      if (!rel)
+	goto fail;
+      if (grub_relocator_alloc_chunk_addr (rel, &ch, (grub_phys_addr_t)
+					   grub_strtoull (state[LOADFILE_ADDR].arg,
+							  0, 0), len))
+	{
+	  grub_relocator_unload (rel);
+	  goto fail;
+	}
+      data = get_virtual_current_address (ch);
+#endif
+    }
+  else
+    data = grub_malloc ((grub_size_t) len);
+
+  if (!data)
+    {
+      grub_error (GRUB_ERR_OUT_OF_MEMORY, N_("out of memory"));
+      goto fail;
+    }
+
+  grub_file_seek (file, (grub_off_t) skip);
+  nread = grub_file_read (file, data, (grub_size_t) len);
+  if (nread < 0 || (grub_uint64_t) nread != len)
+    {
+      if (!grub_errno)
+	grub_error (GRUB_ERR_FILE_READ_ERROR, N_("failed to read full file range"));
+      goto fail;
+    }
+
+  grub_snprintf (mempath, sizeof (mempath), "(mem)[%p]+[%" PRIuGRUB_UINT64_T "]",
+		 data, len);
+  if (state[LOADFILE_SET].set)
+    grub_env_set (state[LOADFILE_SET].arg, mempath);
+  else
+    grub_printf ("File: %s\n", mempath);
+
+fail:
+  if (file)
+    grub_file_close (file);
+  return grub_errno;
+}
+
 GRUB_MOD_INIT(memrw)
 {
   cmd_read_byte =
-    grub_register_extcmd_lockdown ("read_byte", grub_cmd_read, 0,
-                                   N_("ADDR"),
-                                   N_("Read 8-bit value from ADDR."),
-                                   options);
+    grub_register_extcmd ("read_byte", grub_cmd_read, 0,
+			  N_("ADDR"),
+			  N_("Read 8-bit value from ADDR."),
+			  options);
   cmd_read_word =
-    grub_register_extcmd_lockdown ("read_word", grub_cmd_read, 0,
-                                   N_("ADDR"),
-                                   N_("Read 16-bit value from ADDR."),
-                                   options);
+    grub_register_extcmd ("read_word", grub_cmd_read, 0,
+			  N_("ADDR"),
+			  N_("Read 16-bit value from ADDR."),
+			  options);
   cmd_read_dword =
-    grub_register_extcmd_lockdown ("read_dword", grub_cmd_read, 0,
-                                   N_("ADDR"),
-                                   N_("Read 32-bit value from ADDR."),
-                                   options);
+    grub_register_extcmd ("read_dword", grub_cmd_read, 0,
+			  N_("ADDR"),
+			  N_("Read 32-bit value from ADDR."),
+			  options);
   cmd_write_byte =
-    grub_register_command_lockdown ("write_byte", grub_cmd_write,
-                                    N_("ADDR VALUE [MASK]"),
-                                    N_("Write 8-bit VALUE to ADDR."));
+    grub_register_command ("write_byte", grub_cmd_write,
+			   N_("ADDR VALUE [MASK]"),
+			   N_("Write 8-bit VALUE to ADDR."));
   cmd_write_word =
-    grub_register_command_lockdown ("write_word", grub_cmd_write,
-                                    N_("ADDR VALUE [MASK]"),
-                                    N_("Write 16-bit VALUE to ADDR."));
+    grub_register_command ("write_word", grub_cmd_write,
+			   N_("ADDR VALUE [MASK]"),
+			   N_("Write 16-bit VALUE to ADDR."));
   cmd_write_dword =
-    grub_register_command_lockdown ("write_dword", grub_cmd_write,
-                                    N_("ADDR VALUE [MASK]"),
-                                    N_("Write 32-bit VALUE to ADDR."));
+    grub_register_command ("write_dword", grub_cmd_write,
+			   N_("ADDR VALUE [MASK]"),
+			   N_("Write 32-bit VALUE to ADDR."));
+  cmd_write_bytes =
+    grub_register_command ("write_bytes", grub_cmd_write_bytes,
+			   N_("ADDR VALUE1 [VALUE2 [VALUE3 ...]]"),
+			   N_("Write 8-bit VALUE sequence to ADDR."));
+  cmd_loadfile =
+    grub_register_extcmd ("loadfile", grub_cmd_loadfile, 0,
+			  N_("[OPTIONS] FILE"),
+			  N_("Load file content into memory."),
+			  options_loadfile);
 }
 
 GRUB_MOD_FINI(memrw)
@@ -158,4 +310,6 @@ GRUB_MOD_FINI(memrw)
   grub_unregister_command (cmd_write_byte);
   grub_unregister_command (cmd_write_word);
   grub_unregister_command (cmd_write_dword);
+  grub_unregister_command (cmd_write_bytes);
+  grub_unregister_extcmd (cmd_loadfile);
 }

@@ -23,6 +23,7 @@
 #include <grub/misc.h>
 #include <grub/mm.h>
 #include <grub/command.h>
+#include <grub/extcmd.h>
 #include <grub/i18n.h>
 
 GRUB_MOD_LICENSE ("GPLv3+");
@@ -123,6 +124,31 @@ print_edid (struct grub_video_edid_info *edid_info)
       grub_printf_ (N_("    No preferred mode available\n"));
       grub_errno = GRUB_ERR_NONE;
     }
+}
+
+struct s_hook_ctx
+{
+  grub_size_t len;
+  char *data;
+};
+
+static int
+s_hook (const struct grub_video_mode_info *info, void *hook_arg)
+{
+  struct s_hook_ctx *ctx = hook_arg;
+  char buf[24];
+  grub_size_t len;
+
+  if (info->mode_type & GRUB_VIDEO_MODE_TYPE_PURE_TEXT)
+    return 0;
+
+  grub_snprintf (buf, sizeof (buf), "%dx%dx%d ",
+		 info->width, info->height, info->bpp);
+  len = grub_strlen (buf);
+  if (ctx->data)
+    grub_memcpy (ctx->data + ctx->len, buf, len);
+  ctx->len += len;
+  return 0;
 }
 
 static grub_err_t
@@ -230,10 +256,108 @@ grub_cmd_videoinfo (grub_command_t cmd __attribute__ ((unused)),
   return GRUB_ERR_NONE;
 }
 
+static const struct grub_arg_option videomode_options[] =
+{
+  {"list", 'l', 0, N_("List video modes and save to variable."), 0, 0},
+  {"current", 'c', 0, N_("Get current mode (WxH) and save to variable."), 0, 0},
+  {0, 0, 0, 0, 0, 0}
+};
+
+enum videomode_options
+{
+  GFXMODE_LIST,
+  GFXMODE_CURRENT
+};
+
+static grub_err_t
+grub_cmd_videomode (grub_extcmd_context_t ctxt, int argc, char **args)
+{
+  struct grub_arg_list *state = ctxt->state;
+
+  if (argc != 1)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("variable name expected"));
+
+  if (state[GFXMODE_CURRENT].set)
+    {
+      char cur[20];
+      struct grub_video_mode_info info;
+      unsigned int width = 0, height = 0;
+
+      if (grub_video_get_info (&info) == GRUB_ERR_NONE)
+	{
+	  width = info.width;
+	  height = info.height;
+	}
+      else
+	grub_errno = GRUB_ERR_NONE;
+
+      grub_snprintf (cur, sizeof (cur), "%ux%u", width, height);
+      grub_env_set (args[0], cur);
+      return 0;
+    }
+
+#ifdef GRUB_MACHINE_PCBIOS
+  grub_dl_load ("vbe");
+#endif
+
+  {
+    grub_video_adapter_t adapter;
+    grub_video_driver_id_t id = grub_video_get_driver_id ();
+    struct s_hook_ctx ctx;
+
+    FOR_VIDEO_ADAPTERS (adapter)
+      {
+	if (!adapter->iterate)
+	  continue;
+
+	if (adapter->id != id)
+	  {
+	    if (id != GRUB_VIDEO_DRIVER_NONE)
+	      continue;
+	    if (adapter->init () != GRUB_ERR_NONE)
+	      {
+		grub_errno = GRUB_ERR_NONE;
+		continue;
+	      }
+	  }
+
+	ctx.data = NULL;
+	ctx.len = 0;
+	adapter->iterate (s_hook, &ctx);
+	ctx.data = grub_malloc (ctx.len + 1);
+	if (!ctx.data)
+	  {
+	    if (adapter->id != id)
+	      adapter->fini ();
+	    return grub_errno;
+	  }
+	ctx.len = 0;
+	adapter->iterate (s_hook, &ctx);
+	ctx.data[ctx.len] = '\0';
+
+	if (adapter->id != id)
+	  adapter->fini ();
+
+	if (id != GRUB_VIDEO_DRIVER_NONE || ctx.len)
+	  {
+	    grub_env_set (args[0], ctx.data);
+	    grub_free (ctx.data);
+	    return 0;
+	  }
+
+	grub_free (ctx.data);
+      }
+  }
+
+  grub_env_set (args[0], "");
+  return 0;
+}
+
 static grub_command_t cmd;
 #ifdef GRUB_MACHINE_PCBIOS
 static grub_command_t cmd_vbe;
 #endif
+static grub_extcmd_t cmd_videomode;
 
 GRUB_MOD_INIT(videoinfo)
 {
@@ -255,6 +379,10 @@ GRUB_MOD_INIT(videoinfo)
 				      "resolution is given show only modes"
 				      " matching it."));
 #endif
+  cmd_videomode = grub_register_extcmd ("videomode", grub_cmd_videomode, 0,
+					N_("[--list|--current] VAR"),
+					N_("Store video mode information in variable VAR."),
+					videomode_options);
 }
 
 GRUB_MOD_FINI(videoinfo)
@@ -263,5 +391,5 @@ GRUB_MOD_FINI(videoinfo)
 #ifdef GRUB_MACHINE_PCBIOS
   grub_unregister_command (cmd_vbe);
 #endif
+  grub_unregister_extcmd (cmd_videomode);
 }
-

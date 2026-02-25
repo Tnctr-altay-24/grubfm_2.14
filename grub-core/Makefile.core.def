@@ -1311,6 +1311,11 @@ module = {
 };
 
 module = {
+  name = stat;
+  common = commands/stat.c;
+};
+
+module = {
   name = setpci;
   common = commands/setpci.c;
   enable = pci;
