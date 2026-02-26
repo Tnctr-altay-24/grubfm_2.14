@@ -24,6 +24,7 @@
 #include <grub/misc.h>
 #include <grub/mm.h>
 #include <grub/smbios.h>
+#include <grub/procfs.h>
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
@@ -35,6 +36,57 @@ static struct {
 } table_desc;
 
 static grub_extcmd_t cmd;
+static struct grub_smbios_eps3 *grub_smbios_get_eps3 (void);
+
+static char *
+get_smbios (grub_size_t *sz)
+{
+  struct grub_smbios_eps *eps;
+  char *ret;
+
+  *sz = 0;
+  eps = grub_smbios_get_eps ();
+  if (!eps)
+    return NULL;
+
+  *sz = sizeof (struct grub_smbios_eps);
+  ret = grub_malloc (*sz);
+  if (!ret)
+    return NULL;
+  grub_memcpy (ret, eps, *sz);
+  return ret;
+}
+
+static struct grub_procfs_entry proc_smbios =
+{
+  .name = "smbios",
+  .get_contents = get_smbios,
+};
+
+static char *
+get_smbios3 (grub_size_t *sz)
+{
+  struct grub_smbios_eps3 *eps3;
+  char *ret;
+
+  *sz = 0;
+  eps3 = grub_smbios_get_eps3 ();
+  if (!eps3)
+    return NULL;
+
+  *sz = sizeof (struct grub_smbios_eps3);
+  ret = grub_malloc (*sz);
+  if (!ret)
+    return NULL;
+  grub_memcpy (ret, eps3, *sz);
+  return ret;
+}
+
+static struct grub_procfs_entry proc_smbios3 =
+{
+  .name = "smbios3",
+  .get_contents = get_smbios3,
+};
 
 /* Locate the SMBIOS entry point structure depending on the hardware. */
 struct grub_smbios_eps *
@@ -390,9 +442,13 @@ GRUB_MOD_INIT(smbios)
                                  "(-b|-w|-d|-q|-s|-u) offset "
                                  "[--set variable]"),
                               N_("Retrieve SMBIOS information."), options);
+  grub_procfs_register ("smbios", &proc_smbios);
+  grub_procfs_register ("smbios3", &proc_smbios3);
 }
 
 GRUB_MOD_FINI(smbios)
 {
   grub_unregister_extcmd (cmd);
+  grub_procfs_unregister (&proc_smbios);
+  grub_procfs_unregister (&proc_smbios3);
 }

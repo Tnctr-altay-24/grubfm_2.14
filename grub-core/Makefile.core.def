@@ -2989,6 +2989,13 @@ module = {
 };
 
 module = {
+  name = expr;
+  common = commands/expr.c;
+  cflags = '$(CFLAGS_POSIX)';
+  cppflags = '$(CPPFLAGS_POSIX)';
+};
+
+module = {
   name = memtools;
   common = commands/memtools.c;
   condition = COND_MM_DEBUG;

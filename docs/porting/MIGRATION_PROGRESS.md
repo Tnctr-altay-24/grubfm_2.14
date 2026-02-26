@@ -194,3 +194,21 @@
   - `grub-core/normal/main.c`：补充 `normaldbg` 诊断，记录 `config/nested/batch/menu` 关键状态。
   - `grub-core/commands/menuentry.c` + `grub-core/grubfm/{lib,list,open,type}.c`：补充菜单构建、清理、枚举链路调试日志，便于回归对比。
 - 说明：该修复是“进入与显示链路”修复，主题字体/编码导致的乱码问题不在此提交内。
+
+5. `hwinfo` 依赖链补强（进行中）
+- 文件：`grub-core/commands/expr.c`、`grub-core/commands/exprXX.c`、`grub-core/Makefile.core.def`
+- 内容：把 `grub_alive` 的 `expr` 命令实现迁入最新 `grub`，并在模块定义中注册 `name = expr`。
+- 目的：补齐 `grubfm/hwinfo.sh` 的数学表达式能力（`expr --set` 路径）。
+
+6. `gfxmenu` 主题变量替换补强
+- 文件：`grub-core/gfxmenu/gui_label.c`
+- 内容：增加 `@@VAR` 文本语义，标签文本在加载时可直接从环境变量展开。
+- 目的：修复主题中 `@@board_vendor` 等占位符不替换的问题。
+
+7. 硬件信息依赖模块补回
+- 文件：`grub-core/commands/i386/cpuid.c`、`grub-core/commands/smbios.c`、`grub-core/commands/acpi.c`
+- 内容：
+  - `cpuid` 完整特性选项补回（与 `grub_alive` 兼容）。
+  - `smbios` 导出 `(proc)/smbios` 与 `(proc)/smbios3`。
+  - `acpi` 导出 `(proc)/acpi_rsdp`。
+- 目的：满足 `hwinfo.sh` 对 CPU/SMBIOS/ACPI 信息链路的直接读取需求。
