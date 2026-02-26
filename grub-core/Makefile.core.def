@@ -2978,6 +2978,88 @@ module = {
 };
 
 module = {
+  name = version;
+  common = commands/version.c;
+};
+
+module = {
+  name = commandline;
+  common = commands/commandline.c;
+};
+
+module = {
+  name = crc;
+  common = commands/crc.c;
+};
+
+module = {
+  name = dd;
+  common = commands/dd.c;
+};
+
+module = {
+  name = fb;
+  common = fs/fb.c;
+};
+
+module = {
+  name = fatfs;
+  common = lib/fatfs/fat.c;
+  common = lib/fatfs/diskio.c;
+  common = lib/fatfs/ff.c;
+  common = lib/fatfs/ffsystem.c;
+  common = lib/fatfs/ffunicode.c;
+};
+
+module = {
+  name = nes;
+  common = lib/nes/nes.c;
+  cflags = '$(CFLAGS_POSIX) -Wno-unused-parameter';
+  cppflags = '$(CPPFLAGS_POSIX)';
+};
+
+module = {
+  name = bmp;
+  common = video/readers/bmp.c;
+};
+
+module = {
+  name = crscreenshot;
+  common = lib/crscreenshot/crscreenshot.c;
+  common = lib/crscreenshot/lodepng.c;
+  cflags = '$(CFLAGS_POSIX)';
+  cppflags = '$(CPPFLAGS_POSIX)';
+  enable = efi;
+};
+
+module = {
+  name = efi_mouse;
+  common = term/efi/mouse.c;
+  enable = efi;
+};
+
+module = {
+  name = linuxefi;
+  efi = loader/i386/efi/linux.c;
+  enable = i386_efi;
+  enable = x86_64_efi;
+};
+
+module = {
+  name = getenv;
+  common = lib/fake_module.c;
+  enable = efi;
+  depends = efivar;
+};
+
+module = {
+  name = setenv;
+  common = lib/fake_module.c;
+  enable = efi;
+  depends = efivar;
+};
+
+module = {
   name = rdmsr;
   common = commands/i386/rdmsr.c;
   enable = x86;

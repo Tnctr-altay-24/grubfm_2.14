@@ -212,3 +212,21 @@
   - `smbios` 导出 `(proc)/smbios` 与 `(proc)/smbios3`。
   - `acpi` 导出 `(proc)/acpi_rsdp`。
 - 目的：满足 `hwinfo.sh` 对 CPU/SMBIOS/ACPI 信息链路的直接读取需求。
+
+8. `arch/x64/un.lst` 缺口模块开始回补（进行中）
+- 文件：`grub-core/Makefile.core.def` + 新增源码目录
+- 已补模块定义：
+  - `commandline`、`crc`、`dd`、`version`
+  - `fb`、`fatfs`、`nes`
+  - `bmp`、`crscreenshot`
+  - `efi_mouse`、`linuxefi`
+  - `getenv`、`setenv`（兼容壳模块，依赖 `efivar`，避免命令重复注册冲突）
+- 已迁入源码：
+  - `commands/{commandline,crc,dd,version}.c`
+  - `fs/fb.c`
+  - `lib/fatfs/*`
+  - `lib/nes/*`
+  - `lib/crscreenshot/*`
+  - `term/efi/mouse.c`
+  - `loader/i386/efi/linux.c`
+  - `video/readers/bmp.c`
