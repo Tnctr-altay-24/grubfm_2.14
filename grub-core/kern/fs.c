@@ -21,6 +21,7 @@
 #include <grub/net.h>
 #include <grub/fs.h>
 #include <grub/file.h>
+#include <grub/partition.h>
 #include <grub/err.h>
 #include <grub/misc.h>
 #include <grub/types.h>
@@ -53,6 +54,8 @@ grub_fs_probe (grub_device_t device)
 
       for (p = grub_fs_list; p; p = p->next)
 	{
+	  grub_dprintf ("portdbg", "fs_probe: try fs=%s disk=%s\n", p->name,
+			device->disk ? device->disk->name : "(null)");
 	  grub_dprintf ("fs", "Detecting %s...\n", p->name);
 
 	  /* This is evil: newly-created just mounted BtrFS after copying all
@@ -72,7 +75,10 @@ grub_fs_probe (grub_device_t device)
 #endif
 	    (p->fs_dir) (device, "/", probe_dummy_iter, NULL);
 	  if (grub_errno == GRUB_ERR_NONE)
-	    return p;
+	    {
+	      grub_dprintf ("portdbg", "fs_probe: matched fs=%s\n", p->name);
+	      return p;
+	    }
 
 	  grub_error_push ();
 	  /* The grub_error_push() does not touch grub_errmsg. */
@@ -82,7 +88,11 @@ grub_fs_probe (grub_device_t device)
 
 	  if (grub_errno != GRUB_ERR_BAD_FS
 	      && grub_errno != GRUB_ERR_OUT_OF_RANGE)
-	    return 0;
+	    {
+	      grub_dprintf ("portdbg", "fs_probe: hard fail fs=%s errno=%d msg=%s\n",
+			    p->name, grub_errno, grub_errmsg);
+	      return 0;
+	    }
 
 	  grub_errno = GRUB_ERR_NONE;
 	}
@@ -119,6 +129,8 @@ grub_fs_probe (grub_device_t device)
   else if (device->net && device->net->fs)
     return device->net->fs;
 
+  grub_dprintf ("portdbg", "fs_probe: unknown fs (disk=%p net=%p)\n",
+		device->disk, device->net);
   grub_error (GRUB_ERR_UNKNOWN_FS, N_("unknown filesystem"));
   return 0;
 }
@@ -133,6 +145,34 @@ struct grub_fs_block
   grub_disk_addr_t length;
 };
 
+/* Compatible with grub_alive blocklist syntax:
+   - N      : sector N
+   - [N]    : byte offset N
+   - N[M]   : sector N plus byte offset M
+*/
+static grub_uint64_t
+grub_blocklist_strtooffset (const char *str, const char **end)
+{
+  grub_uint64_t ret = 0;
+
+  if (*str != '[')
+    {
+      ret = grub_strtoull (str, &str, 0);
+      ret <<= GRUB_DISK_SECTOR_BITS;
+    }
+  if (*str == '[')
+    {
+      str++;
+      ret += grub_strtoull (str, &str, 0);
+    }
+  if (*str == ']')
+    str++;
+
+  if (end)
+    *end = str;
+  return ret;
+}
+
 static grub_err_t
 grub_fs_blocklist_open (grub_file_t file, const char *name)
 {
@@ -141,7 +181,9 @@ grub_fs_blocklist_open (grub_file_t file, const char *name)
   unsigned i;
   grub_disk_t disk = file->device->disk;
   struct grub_fs_block *blocks;
-  grub_size_t max_sectors;
+  grub_uint64_t max_sectors;
+  grub_uint64_t max_bytes;
+  grub_uint64_t part_sectors = 0;
 
   /* First, count the number of blocks.  */
   do
@@ -160,50 +202,73 @@ grub_fs_blocklist_open (grub_file_t file, const char *name)
 
   file->size = 0;
   max_sectors = grub_disk_from_native_sector (disk, disk->total_sectors);
+  max_bytes = max_sectors << GRUB_DISK_SECTOR_BITS;
   p = (char *) name;
-  for (i = 0; i < num; i++)
+  grub_dprintf ("portdbg", "blocklist_open: spec=`%s' disk=%s\n",
+		name ? name : "(null)",
+		(disk && disk->name) ? disk->name : "(null)");
+  if (!*p)
     {
-      if (*p != '+')
-	{
-	  blocks[i].offset = grub_strtoull (p, &p, 0);
-	  if (grub_errno != GRUB_ERR_NONE || *p != '+')
-	    {
-	      grub_error (GRUB_ERR_BAD_FILENAME,
-			  N_("invalid file name `%s'"), name);
-	      goto fail;
-	    }
-	}
-
-      p++;
-      if (*p == '\0' || *p == ',')
-        blocks[i].length = max_sectors - blocks[i].offset;
+      blocks[0].offset = 0;
+      if (disk->partition)
+        {
+          part_sectors = grub_disk_from_native_sector (disk, disk->partition->len);
+          blocks[0].length = part_sectors << GRUB_DISK_SECTOR_BITS;
+        }
       else
-        blocks[i].length = grub_strtoul (p, &p, 0);
-
-      if (grub_errno != GRUB_ERR_NONE
-	  || blocks[i].length == 0
-	  || (*p && *p != ',' && ! grub_isspace (*p)))
-	{
-	  grub_error (GRUB_ERR_BAD_FILENAME,
-		      N_("invalid file name `%s'"), name);
-	  goto fail;
-	}
-
-      if (max_sectors < blocks[i].offset + blocks[i].length)
-	{
-	  grub_error (GRUB_ERR_BAD_FILENAME, "beyond the total sectors");
-	  goto fail;
-	}
-
-      file->size += (blocks[i].length << GRUB_DISK_SECTOR_BITS);
-      p++;
+        blocks[0].length = max_bytes;
+      file->size = blocks[0].length;
     }
+  else
+    for (i = 0; i < num; i++)
+      {
+        if (*p != '+')
+          {
+            blocks[i].offset = grub_blocklist_strtooffset (p, &p);
+            if (grub_errno != GRUB_ERR_NONE || *p != '+')
+              {
+                grub_error (GRUB_ERR_BAD_FILENAME,
+                            N_("invalid file name `%s'"), name);
+                goto fail;
+              }
+          }
+
+        p++;
+        if (*p == '\0' || *p == ',')
+          blocks[i].length = max_bytes - blocks[i].offset;
+        else
+          blocks[i].length = grub_blocklist_strtooffset (p, &p);
+
+        if (grub_errno != GRUB_ERR_NONE
+            || blocks[i].length == 0
+            || (*p && *p != ',' && !grub_isspace (*p)))
+          {
+            grub_error (GRUB_ERR_BAD_FILENAME,
+                        N_("invalid file name `%s'"), name);
+            goto fail;
+          }
+
+        if (max_bytes < blocks[i].offset + blocks[i].length)
+          {
+            grub_error (GRUB_ERR_BAD_FILENAME, "beyond the total sectors");
+            goto fail;
+          }
+
+        file->size += blocks[i].length;
+        grub_dprintf ("portdbg", "blocklist_open: block[%u] off=0x%llx len=0x%llx\n",
+		      i, (unsigned long long) blocks[i].offset,
+		      (unsigned long long) blocks[i].length);
+        p++;
+      }
 
   file->data = blocks;
 
   return GRUB_ERR_NONE;
 
  fail:
+  grub_dprintf ("portdbg", "blocklist_open fail: spec=`%s' errno=%d msg=%s\n",
+		name ? name : "(null)", grub_errno,
+		grub_errmsg);
   grub_free (blocks);
   return grub_errno;
 }
@@ -212,43 +277,45 @@ static grub_ssize_t
 grub_fs_blocklist_read (grub_file_t file, char *buf, grub_size_t len)
 {
   struct grub_fs_block *p;
-  grub_disk_addr_t sector;
   grub_off_t offset;
   grub_ssize_t ret = 0;
   grub_disk_t disk = file->device->disk;
 
   if (len > file->size - file->offset)
     len = file->size - file->offset;
+  grub_dprintf ("portdbg", "blocklist_read: off=0x%llx len=0x%llx size=0x%llx\n",
+		(unsigned long long) file->offset,
+		(unsigned long long) len,
+		(unsigned long long) file->size);
 
-  sector = (file->offset >> GRUB_DISK_SECTOR_BITS);
-  offset = (file->offset & (GRUB_DISK_SECTOR_SIZE - 1));
+  offset = file->offset;
   disk->read_hook = file->read_hook;
   disk->read_hook_data = file->read_hook_data;
   for (p = file->data; p->length && len > 0; p++)
     {
-      if (sector < p->length)
-	{
-	  grub_size_t size;
+      if (offset < p->length)
+        {
+          grub_size_t size = len;
+          grub_disk_addr_t block_offset = p->offset + offset;
+          grub_disk_addr_t sector = block_offset >> GRUB_DISK_SECTOR_BITS;
+          grub_off_t sec_off = block_offset & (GRUB_DISK_SECTOR_SIZE - 1);
 
-	  size = len;
-	  if (((size + offset + GRUB_DISK_SECTOR_SIZE - 1)
-	       >> GRUB_DISK_SECTOR_BITS) > p->length - sector)
-	    size = ((p->length - sector) << GRUB_DISK_SECTOR_BITS) - offset;
+          if (offset + size > p->length)
+            size = p->length - offset;
 
-	  if (grub_disk_read (disk, p->offset + sector, offset,
-			      size, buf) != GRUB_ERR_NONE)
-	    {
-	      ret = -1;
-	      break;
-	    }
+          if (grub_disk_read (disk, sector, sec_off, size, buf) != GRUB_ERR_NONE)
+            {
+              ret = -1;
+              break;
+            }
 
-	  ret += size;
-	  len -= size;
-	  sector -= ((size + offset) >> GRUB_DISK_SECTOR_BITS);
-	  offset = ((size + offset) & (GRUB_DISK_SECTOR_SIZE - 1));
-	}
+          ret += size;
+          len -= size;
+          buf += size;
+          offset += size;
+        }
       else
-	sector -= p->length;
+        offset -= p->length;
     }
   disk->read_hook = NULL;
   disk->read_hook_data = NULL;

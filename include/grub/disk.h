@@ -52,6 +52,7 @@ enum grub_disk_dev_id
     GRUB_DISK_DEVICE_UBOOTDISK_ID,
     GRUB_DISK_DEVICE_XEN,
     GRUB_DISK_DEVICE_OBDISK_ID,
+    GRUB_DISK_DEVICE_MEM_ID,
   };
 
 struct grub_disk;
@@ -107,6 +108,7 @@ struct grub_disk_dev
 typedef struct grub_disk_dev *grub_disk_dev_t;
 
 extern grub_disk_dev_t EXPORT_VAR (grub_disk_dev_list);
+extern struct grub_disk_dev grub_mem_disk_dev;
 
 struct grub_partition;
 

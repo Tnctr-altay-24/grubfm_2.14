@@ -1384,6 +1384,9 @@ grub_net_open_real (const char *name)
   grub_size_t protnamelen;
   int try;
   int port = 0;
+  grub_dprintf ("portdbg", "net_open_real: name=`%s' default_server=`%s'\n",
+		name ? name : "(null)",
+		grub_net_default_server ? grub_net_default_server : "(null)");
 
   if (grub_strncmp (name, "pxe:", sizeof ("pxe:") - 1) == 0)
     {
@@ -1416,10 +1419,14 @@ grub_net_open_real (const char *name)
     }
   if (!server)
     {
+      grub_dprintf ("portdbg", "net_open_real: no server for `%s' (proto=%.*s)\n",
+		    name ? name : "(null)", (int) protnamelen, protname);
       grub_error (GRUB_ERR_NET_BAD_ADDRESS,
 		  N_("no server is specified"));
       return NULL;
     }
+  grub_dprintf ("portdbg", "net_open_real: proto=%.*s server=`%s'\n",
+		(int) protnamelen, protname, server);
 
   /* IPv6 or port specified? */
   if ((port_start = grub_strchr (server, ':')))
@@ -1489,6 +1496,7 @@ grub_net_open_real (const char *name)
     host = grub_strdup (server);
   if (!host)
     return NULL;
+  grub_dprintf ("portdbg", "net_open_real: parsed host=`%s' port=%d\n", host, port);
 
   for (try = 0; try < 2; try++)
     {
@@ -1507,6 +1515,8 @@ grub_net_open_real (const char *name)
 	    ret->port = port;
 	    ret->server = host;
 	    ret->fs = &grub_net_fs;
+	    grub_dprintf ("portdbg", "net_open_real: matched proto=%s host=`%s' port=%d\n",
+			  proto->name, host, port);
 	    return ret;
 	  }
       }
@@ -1577,6 +1587,8 @@ grub_net_open_real (const char *name)
     }
 
   /* Restore original error.  */
+  grub_dprintf ("portdbg", "net_open_real: no protocol handler for `%s' proto=%.*s\n",
+		name ? name : "(null)", (int) protnamelen, protname);
   grub_error (GRUB_ERR_UNKNOWN_DEVICE, N_("disk `%s' not found"),
 	      name);
 

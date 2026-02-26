@@ -73,6 +73,8 @@ grub_file_open (const char *name, enum grub_file_type type)
   device_name = grub_file_get_device_name (name);
   if (grub_errno)
     goto fail;
+  grub_dprintf ("portdbg", "file_open: name=`%s' dev=`%s' type=%d\n",
+		name, device_name ? device_name : "(root)", type);
 
   /* Get the file part of NAME.  */
   file_name = (name[0] == '(') ? grub_strchr (name, ')') : NULL;
@@ -86,6 +88,8 @@ grub_file_open (const char *name, enum grub_file_type type)
   device_name = NULL;
   if (! device)
     goto fail;
+  grub_dprintf ("portdbg", "file_open: device opened (disk=%p net=%p)\n",
+		device->disk, device->net);
 
   file = (grub_file_t) grub_zalloc (sizeof (*file));
   if (! file)
@@ -111,6 +115,8 @@ grub_file_open (const char *name, enum grub_file_type type)
       if (! file->fs)
 	goto fail;
     }
+  grub_dprintf ("portdbg", "file_open: fs=%s file=`%s'\n",
+		file->fs ? file->fs->name : "(null)", file_name);
 
   if ((file->fs->fs_open) (file, file_name) != GRUB_ERR_NONE)
     goto fail;
@@ -142,6 +148,9 @@ grub_file_open (const char *name, enum grub_file_type type)
   return file;
 
  fail:
+  grub_dprintf ("portdbg", "file_open fail: name=`%s' errno=%d msg=%s\n",
+		name ? name : "(null)", grub_errno,
+		grub_errmsg);
   grub_free (device_name);
   if (device)
     grub_device_close (device);

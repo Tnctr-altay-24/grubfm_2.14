@@ -33,6 +33,8 @@ grub_device_t
 grub_device_open (const char *name)
 {
   grub_device_t dev = 0;
+  grub_err_t disk_err = GRUB_ERR_NONE;
+  const char *orig_name = name;
 
   if (! name)
     {
@@ -43,6 +45,8 @@ grub_device_open (const char *name)
 	  goto fail;
 	}
     }
+  grub_dprintf ("portdbg", "device_open: req=`%s' resolved=`%s'\n",
+		orig_name ? orig_name : "(null)", name ? name : "(null)");
 
   dev = grub_malloc (sizeof (*dev));
   if (! dev)
@@ -52,17 +56,34 @@ grub_device_open (const char *name)
   /* Try to open a disk.  */
   dev->disk = grub_disk_open (name);
   if (dev->disk)
-    return dev;
+    {
+      grub_dprintf ("portdbg", "device_open: disk ok `%s'\n", name);
+      return dev;
+    }
+  disk_err = grub_errno;
+  grub_dprintf ("portdbg", "device_open: disk fail `%s' errno=%d msg=%s\n",
+		name, disk_err, grub_errmsg);
   if (grub_net_open && grub_errno == GRUB_ERR_UNKNOWN_DEVICE)
     {
       grub_errno = GRUB_ERR_NONE;
+      grub_dprintf ("portdbg", "device_open: try net fallback `%s'\n", name);
       dev->net = grub_net_open (name);
+      /* If network open also fails, keep the original disk-side error.
+         This avoids masking failures such as memdisk open as net errors.  */
+      if (!dev->net && disk_err != GRUB_ERR_NONE)
+	grub_errno = disk_err;
     }
 
   if (dev->net)
-    return dev;
+    {
+      grub_dprintf ("portdbg", "device_open: net ok `%s'\n", name);
+      return dev;
+    }
 
  fail:
+  grub_dprintf ("portdbg", "device_open fail: `%s' errno=%d msg=%s\n",
+		name ? name : "(null)", grub_errno,
+		grub_errmsg);
   grub_free (dev);
 
   return 0;
