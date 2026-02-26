@@ -28,6 +28,7 @@
 #include <grub/term.h>
 #include <grub/video.h>
 #include <grub/bitmap.h>
+#include <grub/normal.h>
 #include <grub/gfxmenu_view.h>
 
 #ifdef GRUB_MACHINE_MULTIBOOT
@@ -59,17 +60,25 @@ grubfm_init (void)
 {
   if (!init)
   {
+    grub_dprintf ("grubfm", "init: root=%s user=%s data=%s\n",
+                  grubfm_root, grubfm_user[0] ? grubfm_user : "(none)",
+                  grubfm_data_path);
     grubfm_ini_config = grubfm_ini_enum (grubfm_root, &grubfm_ext_table);
     if (grubfm_user[0])
       grubfm_usr_config = grubfm_ini_enum (grubfm_user, &grubfm_usr_table);
+    grub_dprintf ("grubfm", "init: root_types=%d user_types=%d root_cfg=%p user_cfg=%p\n",
+                  grubfm_ext_table.n, grubfm_usr_table.n,
+                  grubfm_ini_config, grubfm_usr_config);
     init = 1;
   }
 }
 
 static grub_err_t
-grub_cmd_grubfm (grub_extcmd_context_t ctxt __attribute__ ((unused)),
+grub_cmd_grubfm (grub_extcmd_context_t ctxt,
                  int argc, char **args)
 {
+  grub_dprintf ("grubfm", "cmd grubfm: argc=%d path=%s\n",
+                argc, (argc && args[0]) ? args[0] : "(device-list)");
   grubfm_init ();
   grubfm_clear_menu ();
   grub_env_set ("grubfm_current_path", argc ? args[0] : "");
@@ -79,9 +88,33 @@ grub_cmd_grubfm (grub_extcmd_context_t ctxt __attribute__ ((unused)),
   else
     grubfm_enum_file (args[0]);
   if (grubfm_file_exist ("(%s)%sglobal.lua", grubfm_root, grubfm_data_path))
+    {
+      grub_dprintf ("grubfm", "cmd grubfm: run global.lua from %s\n", grubfm_root);
     grubfm_src_exe ("lua (%s)%sglobal.lua", grubfm_root, grubfm_data_path);
+    }
   else if (grubfm_file_exist ("(%s)%sglobal.sh", grubfm_root, grubfm_data_path))
+    {
+      grub_dprintf ("grubfm", "cmd grubfm: run global.sh from %s\n", grubfm_root);
     grubfm_src_exe ("source (%s)%sglobal.sh", grubfm_root, grubfm_data_path);
+    }
+  else
+    grub_dprintf ("grubfm", "cmd grubfm: no global.(lua|sh) under (%s)%s\n",
+                  grubfm_root, grubfm_data_path);
+
+  /* Interactive use: calling `grubfm` from command line should display
+     the menu immediately. When called from config/script, keep original
+     behavior and let normal parser flow control the menu lifecycle. */
+  if (!ctxt->script)
+    {
+      grub_menu_t menu = grub_env_get_menu ();
+      grub_dprintf ("grubfm", "cmd grubfm: interactive, menu=%p size=%d\n",
+                    menu, menu ? menu->size : -1);
+      if (menu && menu->size > 0)
+        grub_show_menu (menu, 1, 0);
+    }
+
+  grub_dprintf ("grubfm", "cmd grubfm: done errno=%d msg=%s\n",
+                grub_errno, grub_errmsg);
   return 0;
 }
 
@@ -89,6 +122,8 @@ static grub_err_t
 grub_cmd_grubfm_open (grub_extcmd_context_t ctxt __attribute__ ((unused)),
         int argc, char **args)
 {
+  grub_dprintf ("grubfm", "cmd grubfm_open: argc=%d file=%s\n",
+                argc, (argc == 1 && args[0]) ? args[0] : "(invalid)");
   grubfm_init ();
   grubfm_clear_menu ();
   if (argc != 1)
@@ -96,6 +131,8 @@ grub_cmd_grubfm_open (grub_extcmd_context_t ctxt __attribute__ ((unused)),
   grub_env_set ("grubfm_file", args[0]);
   grub_env_export ("grubfm_file");
   grubfm_open_file (args[0]);
+  grub_dprintf ("grubfm", "cmd grubfm_open: done errno=%d msg=%s\n",
+                grub_errno, grub_errmsg);
   return 0;
 }
 

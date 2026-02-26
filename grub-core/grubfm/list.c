@@ -174,6 +174,7 @@ grubfm_enum_device_iter (const char *name, void *data)
         grubfm_add_menu (title, "iso", NULL, src, 0);
       else
         grubfm_add_menu (title, "hdd", NULL, src, 0);
+      grub_dprintf ("grubfm", "enum_device: add (%s) fs=%s\n", name, fs->name);
       *found = 1;
       grub_free (title);
       grub_free (src);
@@ -197,6 +198,7 @@ grubfm_enum_device (void)
 {
   int found = 0;
   grub_device_iterate (grubfm_enum_device_iter, &found);
+  grub_dprintf ("grubfm", "enum_device: found=%d\n", found);
   if (!found)
     grubfm_add_menu ("NO DISK", "cancel", NULL, "echo", 0);
   return 0;
@@ -302,11 +304,12 @@ int
 grubfm_enum_file (char *dirname)
 {
   char *device_name;
-  grub_fs_t fs;
+  grub_fs_t fs = 0;
   const char *path;
   grub_device_t dev;
   unsigned int menu_cnt = 0;
 
+  grub_dprintf ("grubfm", "enum_file: dirname=%s top=%s\n", dirname, grubfm_top);
   if (grub_strcmp (grubfm_top, dirname) != 0)
   {
     grubfm_add_menu_parent (dirname);
@@ -344,6 +347,8 @@ grubfm_enum_file (char *dirname)
     struct grubfm_enum_file_list ctx = { 0, NULL, 0, NULL, NULL , 0, 0};
     ctx.dirname = dirname;
     (fs->fs_dir) (dev, path, grubfm_enum_file_count, &ctx);
+    grub_dprintf ("grubfm", "enum_file: count path=%s dirs=%d files=%d\n",
+                  path, ctx.ndirs, ctx.nfiles);
     ctx.file_list = grub_zalloc (ctx.nfiles * sizeof (ctx.file_list[0]));
     if (!ctx.file_list)
       return 0;
@@ -353,6 +358,8 @@ grubfm_enum_file (char *dirname)
     (fs->fs_dir) (dev, path, grubfm_enum_file_iter, &ctx);
     ctx.ndirs = ctx.d;
     ctx.nfiles = ctx.f;
+    grub_dprintf ("grubfm", "enum_file: iter path=%s dirs=%d files=%d\n",
+                  path, ctx.ndirs, ctx.nfiles);
     menu_cnt += ctx.ndirs + ctx.nfiles;
     if (!disable_qsort || disable_qsort[0] != '1')
       grubfm_sort_list (ctx.dir_list, ctx.ndirs);
@@ -388,10 +395,13 @@ grubfm_enum_file (char *dirname)
     }
     if (!menu_cnt)
       grubfm_add_menu ("NO FILE", "cancel", NULL, "echo", 0);
+    grub_dprintf ("grubfm", "enum_file: menu_cnt=%u\n", menu_cnt);
     grubfm_enum_file_list_close (&ctx);
   }
 
  fail:
+  grub_dprintf ("grubfm", "enum_file done: dirname=%s fs=%p errno=%d msg=%s\n",
+                dirname, fs, grub_errno, grub_errmsg);
   if (dev)
     grub_device_close (dev);
 

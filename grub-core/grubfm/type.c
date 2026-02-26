@@ -79,10 +79,13 @@ grubfm_ini_enum (const char *devname, struct grubfm_ini_enum_list *ctx)
     goto fail;
 
   fs = grub_fs_probe (dev);
+  grub_dprintf ("grubfm", "ini_enum: dev=%s path=%s fs=%p\n",
+                devname, path, fs);
 
   if (fs)
   {
     (fs->fs_dir) (dev, path, grubfm_ini_enum_count, ctx);
+    grub_dprintf ("grubfm", "ini_enum: count=%d on %s\n", ctx->n, devname);
     ctx->ext = grub_zalloc (ctx->n * sizeof (ctx->ext[0]));
     ctx->display = grub_zalloc (ctx->n * sizeof (ctx->display[0]));
     ctx->icon = grub_zalloc (ctx->n * sizeof (ctx->icon[0]));
@@ -118,6 +121,7 @@ grubfm_ini_enum (const char *devname, struct grubfm_ini_enum_list *ctx)
   ini_name = grub_xasprintf ("(%s)%srules/generic.ini", devname, grubfm_data_path);
   if (grubfm_file_exist (ini_name))
     cfg = ini_load (ini_name);
+  grub_dprintf ("grubfm", "ini_enum: generic=%p for dev=%s\n", cfg, devname);
   grub_free (ini_name);
 
 fail:

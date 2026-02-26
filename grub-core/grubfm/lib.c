@@ -176,6 +176,7 @@ grubfm_file_exist (const char *fmt, ...)
 void
 grubfm_clear_menu (void)
 {
+  grub_dprintf ("grubfm", "clear_menu\n");
   grub_normal_clear_menu ();
 }
 
@@ -195,6 +196,9 @@ add_menu (const char *title, const char *icon, const char *id,
       if (!show_hidden || show_hidden[0] != '1')
         return;
     }
+  grub_dprintf ("grubfm", "add_menu: title=%s icon=%s id=%s hotkey=%s hidden=%d\n",
+                title ? title : "(null)", icon ? icon : "(none)",
+                id ? id : "(none)", hotkey ? hotkey : "(none)", hidden);
   args = grub_malloc (sizeof (args[0]));
   if (!args)
     return;
@@ -320,6 +324,8 @@ void grubfm_src_exe (const char *fmt, ...)
   va_end (ap);
   if (!src)
     return;
+  grub_dprintf ("grubfm", "script: %s\n", src);
   grub_script_execute_sourcecode (src);
+  grub_dprintf ("grubfm", "script done: errno=%d msg=%s\n", grub_errno, grub_errmsg);
   grub_free (src);
 }

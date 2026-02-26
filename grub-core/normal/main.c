@@ -280,11 +280,18 @@ grub_normal_execute (const char *config, int nested, int batch)
 
   if (config)
     {
+      grub_dprintf ("normaldbg", "normal_execute: config=%s nested=%d batch=%d\n",
+                    config, nested, batch);
       menu = read_config_file (config);
+      grub_dprintf ("normaldbg", "normal_execute: menu=%p size=%d\n",
+                    menu, menu ? menu->size : -1);
 
       /* Ignore any error.  */
       grub_errno = GRUB_ERR_NONE;
     }
+  else
+    grub_dprintf ("normaldbg", "normal_execute: no config nested=%d batch=%d\n",
+                  nested, batch);
 
   grub_boot_time ("Executed config file");
 
@@ -292,6 +299,8 @@ grub_normal_execute (const char *config, int nested, int batch)
     {
       if (menu && menu->size)
 	{
+	  grub_dprintf ("normaldbg", "normal_execute: show_menu size=%d nested=%d\n",
+                        menu->size, nested);
 
 	  grub_boot_time ("Entering menu");
 	  grub_show_menu (menu, nested, 0);
@@ -321,6 +330,9 @@ static grub_err_t
 grub_cmd_normal (struct grub_command *cmd __attribute__ ((unused)),
 		 int argc, char *argv[])
 {
+  grub_dprintf ("normaldbg", "cmd_normal: argc=%d argv0=%s prefix=%s\n",
+                argc, (argc > 0 && argv[0]) ? argv[0] : "(none)",
+                grub_env_get ("prefix"));
   if (argc == 0)
     {
       /* Guess the config filename. It is necessary to make CONFIG static,
@@ -348,18 +360,25 @@ grub_cmd_normal (struct grub_command *cmd __attribute__ ((unused)),
           if (net_search_cfg && net_search_cfg[0] == 'n')
             disable_net_search = 1;
 
-          if (grub_strncmp (prefix + 1, "tftp", sizeof ("tftp") - 1) == 0 &&
+	  if (grub_strncmp (prefix + 1, "tftp", sizeof ("tftp") - 1) == 0 &&
               !disable_net_search)
             grub_net_search_config_file (config, config_len);
+          grub_dprintf ("normaldbg", "cmd_normal: auto config=%s\n", config);
 
 	  grub_enter_normal_mode (config);
 	  grub_free (config);
 	}
       else
+	{
+	  grub_dprintf ("normaldbg", "cmd_normal: no prefix, enter without config\n");
 	grub_enter_normal_mode (0);
+	}
     }
   else
+    {
+      grub_dprintf ("normaldbg", "cmd_normal: explicit config=%s\n", argv[0]);
     grub_enter_normal_mode (argv[0]);
+    }
 
 quit:
   return 0;

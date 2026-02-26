@@ -147,6 +147,7 @@ grubfm_check_boot (struct grubfm_enum_file_info *info,
 void
 grubfm_open_file (char *path)
 {
+  grub_dprintf ("grubfm", "open_file: %s\n", path ? path : "(null)");
   grubfm_add_menu_back (path);
   struct grubfm_enum_file_info info;
   struct grubfm_ini_enum_list *ctx = &grubfm_ext_table;
@@ -155,7 +156,11 @@ grubfm_open_file (char *path)
   file = grub_file_open (path, GRUB_FILE_TYPE_GET_SIZE |
                            GRUB_FILE_TYPE_NO_DECOMPRESS);
   if (!file)
+  {
+    grub_dprintf ("grubfm", "open_file: open failed errno=%d msg=%s\n",
+                  grub_errno, grub_errmsg);
     return;
+  }
   info.name = file->name;
   info.size = (char *) grub_get_human_size (file->size,
                                             GRUB_HUMAN_SIZE_SHORT);
@@ -178,6 +183,9 @@ generic:
     grubfm_add_ini_menu (grubfm_usr_config, grubfm_user);
   if (grubfm_ini_config)
     grubfm_add_ini_menu (grubfm_ini_config, grubfm_root);
+
+  grub_dprintf ("grubfm", "open_file: done ext=%d name=%s\n",
+                info.ext, info.name ? info.name : "(null)");
 
   grub_file_close (file);
 }

@@ -110,7 +110,11 @@ grub_normal_add_menu_entry (int argc, const char **args,
 
   menu = grub_env_get_menu ();
   if (! menu)
+    {
+      grub_dprintf ("normaldbg", "add_menu_entry: no menu context title=%s\n",
+                    (argc > 0 && args && args[0]) ? args[0] : "(none)");
     return grub_error (GRUB_ERR_MENU, "no menu context");
+    }
 
   last = &menu->entry_list;
 
@@ -208,6 +212,10 @@ grub_normal_add_menu_entry (int argc, const char **args,
   (*last)->blsuki = blsuki;
 
   menu->size++;
+  grub_dprintf ("normaldbg", "add_menu_entry: title=%s id=%s size=%d submenu=%d\n",
+                (*last)->title ? (*last)->title : "(null)",
+                (*last)->id ? (*last)->id : "(null)",
+                menu->size, submenu);
   return GRUB_ERR_NONE;
 
  fail:
@@ -385,7 +393,11 @@ grub_normal_clear_menu (void)
   grub_menu_entry_t entry;
 
   if (!menu)
+    {
+      grub_dprintf ("normaldbg", "clear_menu: no menu context\n");
     return;
+    }
+  grub_dprintf ("normaldbg", "clear_menu: before size=%d\n", menu->size);
 
   entry = menu->entry_list;
   while (entry)
@@ -421,6 +433,7 @@ grub_normal_clear_menu (void)
 
   menu->entry_list = NULL;
   menu->size = 0;
+  grub_dprintf ("normaldbg", "clear_menu: after size=%d\n", menu->size);
 }
 
 static grub_extcmd_t cmd, cmd_sub, cmd_hidden, cmd_pop, cmd_sub_exit;
