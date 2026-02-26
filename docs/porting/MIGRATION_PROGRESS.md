@@ -179,3 +179,18 @@
 - 仓库：`/home/aromatic/Applications/grub2-filemanager`
 - 文件：`build.sh`（x64 的 `grub-mkimage -p` 参数）
 - 结论：`prefix=(cd0)(/boot/grubfm` 来自错误的 `-p` 字符串拼接，不是 `config.cfg`/`init.sh` 导致。
+
+3. `8f22310a4` `port: restore mem-backed memdisk path and add open-path diagnostics`
+- 修复背景：`ls (memdisk)/` 触发 `grub_net_open_real: no server is specified`，表现为把 `(mem)` 路径误走到网络设备回退。
+- 关键修复：
+  - `disk/memdisk.c`：补回 mem-backed memdisk 打开路径，确保 `(mem) [addr]+[size]` 能被正确当作内存磁盘源处理。
+  - `kern/device.c` / `kern/file.c` / `net/net.c`：补充调试输出（`portdbg`）用于定位 device->disk->net fallback 过程。
+- 修复后：`(memdisk)` 设备可正常解析并读取，不再因错误 fallback 报 `no server is specified`。
+
+4. `69f5793bd` `grubfm: show menu in interactive mode and expand menu/normal diagnostics`
+- 修复背景：执行 `grubfm` 后返回命令行，菜单未进入交互显示。
+- 关键修复：
+  - `grub-core/grubfm/fm.c`：在交互场景下显式进入菜单显示路径，避免仅构建菜单项但不展示。
+  - `grub-core/normal/main.c`：补充 `normaldbg` 诊断，记录 `config/nested/batch/menu` 关键状态。
+  - `grub-core/commands/menuentry.c` + `grub-core/grubfm/{lib,list,open,type}.c`：补充菜单构建、清理、枚举链路调试日志，便于回归对比。
+- 说明：该修复是“进入与显示链路”修复，主题字体/编码导致的乱码问题不在此提交内。
