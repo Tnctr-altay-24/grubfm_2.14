@@ -97,7 +97,12 @@ get_entry_index_by_hotkey (grub_menu_t menu, int hotkey)
   for (i = 0, entry = menu->entry_list; i < menu->size;
        i++, entry = entry->next)
     if (entry->hotkey == hotkey)
-      return i;
+      {
+	grub_dprintf ("normaldbg",
+		      "menu_hotkey: key=0x%x matched index=%d title=%s\n",
+		      hotkey, i, entry->title ? entry->title : "(null)");
+	return i;
+      }
 
   return -1;
 }

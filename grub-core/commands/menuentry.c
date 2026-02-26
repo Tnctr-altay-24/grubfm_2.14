@@ -212,10 +212,12 @@ grub_normal_add_menu_entry (int argc, const char **args,
   (*last)->blsuki = blsuki;
 
   menu->size++;
-  grub_dprintf ("normaldbg", "add_menu_entry: title=%s id=%s size=%d submenu=%d\n",
+  grub_dprintf ("normaldbg",
+		"add_menu_entry: title=%s id=%s size=%d submenu=%d hotkey_arg=%s hotkey_code=0x%x\n",
                 (*last)->title ? (*last)->title : "(null)",
                 (*last)->id ? (*last)->id : "(null)",
-                menu->size, submenu);
+                menu->size, submenu,
+		hotkey ? hotkey : "(none)", menu_hotkey);
   return GRUB_ERR_NONE;
 
  fail:
@@ -301,7 +303,18 @@ grub_cmd_menuentry (grub_extcmd_context_t ctxt, int argc, char **args)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, "no menuentry definition");
 
   if (ctxt->extcmd->cmd->name[0] == 'h' && !show_hidden_entries_enabled ())
-    return GRUB_ERR_NONE;
+    {
+      /* Keep hidden hotkey entries active even when hidden items are not shown. */
+      if (!ctxt->state[2].set)
+	{
+	  grub_dprintf ("normaldbg",
+			"menuentry: skip hidden entry (show_hidden=0, no hotkey)\n");
+	  return GRUB_ERR_NONE;
+	}
+      grub_dprintf ("normaldbg",
+		    "menuentry: keep hidden hotkey entry hotkey=%s (show_hidden=0)\n",
+		    ctxt->state[2].arg ? ctxt->state[2].arg : "(null)");
+    }
 
   if (ctxt->state[1].set)
     users = ctxt->state[1].arg;
