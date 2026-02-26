@@ -259,3 +259,4 @@
 - `linuxefi/initrdefi`：命令名已保留，但功能尚未回填。
 - `efi_mouse`：模块名已保留，但功能尚未回填。
 - `crscreenshot`：当前为最小占位实现，不含截图编码链路。
+- `gfxterm_menu`：已补同名兼容模块（`fake_module` + 依赖 `gfxmenu`），用于满足 `insmod gfxterm_menu`/模块清单兼容；非测试版 `tests/gfxterm_menu.c` 行为未启用。
