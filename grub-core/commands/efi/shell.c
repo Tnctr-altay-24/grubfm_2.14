@@ -83,6 +83,8 @@ grub_efi_shell_chain (int argc, char *argv[], grub_efi_device_path_t *dp)
   grub_efi_boot_services_t *b;
   grub_efi_char16_t *cmdline = NULL;
   grub_efi_loaded_image_t *loaded_image;
+  grub_efi_loaded_image_t *self_loaded_image;
+  grub_efi_device_path_t *fallback_dp = NULL;
   grub_efi_handle_t image_handle;
   grub_efi_uintn_t pages;
   grub_efi_physical_address_t address = 0;
@@ -103,14 +105,42 @@ grub_efi_shell_chain (int argc, char *argv[], grub_efi_device_path_t *dp)
   shell_image = (void *) ((grub_addr_t) address);
   grub_memcpy (shell_image, shell_efi, shell_efi_len); 
 
-  status = efi_call_6 (b->load_image, 0, grub_efi_image_handle, dp,
-                       shell_image, shell_efi_len, &image_handle);
+  status = grub_efi_load_image (0, grub_efi_image_handle, dp,
+				shell_image, shell_efi_len, &image_handle);
+  if (status != GRUB_EFI_SUCCESS && dp)
+    {
+      grub_dprintf ("shell",
+		    "load_image with device path failed: status=0x%lx, retry with NULL dp\n",
+		    (unsigned long) status);
+      status = grub_efi_load_image (0, grub_efi_image_handle, NULL,
+				    shell_image, shell_efi_len, &image_handle);
+    }
+  if (status == GRUB_EFI_INVALID_PARAMETER)
+    {
+      self_loaded_image = grub_efi_get_loaded_image (grub_efi_image_handle);
+      if (self_loaded_image)
+	fallback_dp = self_loaded_image->file_path;
+      if (fallback_dp && fallback_dp != dp)
+	{
+	  grub_dprintf ("shell",
+			"load_image invalid parameter, retry with parent file_path dp\n");
+	  status = grub_efi_load_image (0, grub_efi_image_handle, fallback_dp,
+					shell_image, shell_efi_len, &image_handle);
+	}
+    }
   if (status != GRUB_EFI_SUCCESS)
   {
+    grub_dprintf ("shell", "load_image failed: status=0x%lx\n",
+		  (unsigned long) status);
     if (status == GRUB_EFI_OUT_OF_RESOURCES)
       grub_error (GRUB_ERR_OUT_OF_MEMORY, "out of resources");
+    else if (status == GRUB_EFI_SECURITY_VIOLATION)
+      grub_error (GRUB_ERR_ACCESS_DENIED,
+		  "cannot load image (security violation, status=0x%lx)",
+		  (unsigned long) status);
     else
-      grub_error (GRUB_ERR_BAD_OS, "cannot load image");
+      grub_error (GRUB_ERR_BAD_OS, "cannot load image (status=0x%lx)",
+		  (unsigned long) status);
     goto fail;
   }
   loaded_image = grub_efi_get_loaded_image (image_handle);
@@ -148,9 +178,15 @@ grub_efi_shell_chain (int argc, char *argv[], grub_efi_device_path_t *dp)
     loaded_image->load_options = cmdline;
     loaded_image->load_options_size = len;
   }
-  efi_call_3 (b->start_image, image_handle, NULL, NULL);
+  status = grub_efi_start_image (image_handle, NULL, NULL);
+  if (status != GRUB_EFI_SUCCESS)
+    {
+      grub_error (GRUB_ERR_BAD_OS, "failed to start image (status=0x%lx)",
+		  (unsigned long) status);
+      goto fail;
+    }
 
-  status = efi_call_1 (b->unload_image, image_handle);
+  status = grub_efi_unload_image (image_handle);
   if (status != GRUB_EFI_SUCCESS)
     grub_printf ("Exit status code: 0x%08lx\n", (long unsigned int) status);
   grub_free (cmdline);
