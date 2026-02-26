@@ -229,4 +229,33 @@
   - `lib/crscreenshot/*`
   - `term/efi/mouse.c`
   - `loader/i386/efi/linux.c`
-  - `video/readers/bmp.c`
+ - `video/readers/bmp.c`
+
+## G. 2026-02-26 增量（本轮）
+1. 构建链路修通（`un.lst` 第二批）
+- 目标模块批量构建通过：
+  - `commandline`、`crc`、`dd`、`version`
+  - `fb`、`fatfs`、`nes`
+  - `bmp`、`crscreenshot`
+  - `efi_mouse`、`linuxefi`
+  - `getenv`、`setenv`
+
+2. 关键兼容修复
+- `commands/dd.c`
+  - 去除对未导出符号 `grub_fs_blocklist` 的硬引用，改为 `fs->name == "blocklist"` 判断。
+  - 继续采用本地 `dd_blocklist_write()`（`grub_disk_write`）实现 blocklist 写入。
+- `grub-core/Makefile.core.def`
+  - `crscreenshot` 暂改为只编译 `crscreenshot.c`，避免 `lodepng/uefi_wrapper` 与新 EFI API 冲突导致全局构建失败。
+
+3. 占位实现（可编译，待功能回填）
+- `loader/i386/efi/linux.c`：
+  - 当前为 `linuxefi/initrdefi` 兼容占位命令，返回 `NOT_IMPLEMENTED_YET`。
+  - 原因：旧实现依赖的 `linux_kernel_params` 字段、EFI 分配接口与当前主线不兼容。
+- `term/efi/mouse.c`：
+  - 当前为 `efi_mouse` 空模块占位（仅 `GRUB_MOD_INIT/FINI`）。
+  - 原因：旧实现依赖 `grub_efi_guid_t`、`efi_call_*`、`TRUE` 等旧 EFI 封装接口。
+
+4. 与 `grub_alive` 差异更新
+- `linuxefi/initrdefi`：命令名已保留，但功能尚未回填。
+- `efi_mouse`：模块名已保留，但功能尚未回填。
+- `crscreenshot`：当前为最小占位实现，不含截图编码链路。

@@ -145,7 +145,7 @@ grub_cmd_nes (grub_extcmd_context_t ctxt __attribute__ ((unused)),
                        N_("gfxmode (minimum resolution 640x480) required"));
   if (!argc)
   {
-    printf("Usage: nes game.nes\n");
+    grub_printf ("Usage: nes game.nes\n");
     return 1;
   }
 
@@ -163,7 +163,7 @@ grub_cmd_nes (grub_extcmd_context_t ctxt __attribute__ ((unused)),
       pixel_size = 2;
   }
   if (argc >= 3)
-    wait_time = strtoul (argv[2], NULL, 0);
+    wait_time = grub_strtoul (argv[2], NULL, 0);
 
   const char *ines_name = argv[0];
 
@@ -171,21 +171,21 @@ grub_cmd_nes (grub_extcmd_context_t ctxt __attribute__ ((unused)),
   void* ines_data = read_file (ines_name, &ines_data_size);
   if (ines_data == NULL)
   {
-    printf ("Reading %s failed.\n", ines_name);
+    grub_printf ("Reading %s failed.\n", ines_name);
     return 1;
   }
 
   agnes_t *agnes = agnes_make ();
   if (agnes == NULL)
   {
-    printf ("Making agnes failed.\n");
+    grub_printf ("Making agnes failed.\n");
     return 1;
   }
 
   bool ok = agnes_load_ines_data (agnes, ines_data, ines_data_size);
   if (!ok)
   {
-    printf("Loading %s failed.\n", ines_name);
+    grub_printf ("Loading %s failed.\n", ines_name);
     return 1;
   }
 
@@ -225,7 +225,7 @@ grub_cmd_nes (grub_extcmd_context_t ctxt __attribute__ ((unused)),
     ok = agnes_next_frame(agnes);
     if (!ok)
     {
-      printf("Getting next frame failed.\n");
+      grub_printf ("Getting next frame failed.\n");
       return 1;
     }
 

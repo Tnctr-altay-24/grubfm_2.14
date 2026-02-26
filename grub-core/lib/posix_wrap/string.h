@@ -78,6 +78,12 @@ strcoll (const char *s1, const char *s2)
   return grub_strcmp (s1, s2);
 }
 
+static inline int
+strncmp (const char *s1, const char *s2, grub_size_t n)
+{
+  return grub_strncmp (s1, s2, n);
+}
+
 static inline void *
 memchr (const void *s, int c, grub_size_t n)
 {

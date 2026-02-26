@@ -31,6 +31,22 @@
 #include <grub/efi/efi.h>
 #endif
 
+#ifndef GRUB_VERSION
+#define GRUB_VERSION PACKAGE_VERSION
+#endif
+
+#ifndef GRUB_VERSION_GIT
+#define GRUB_VERSION_GIT ""
+#endif
+
+#ifndef GRUB_RPM_VERSION
+#define GRUB_RPM_VERSION ""
+#endif
+
+#ifndef GRUB_BUILD_DATE
+#define GRUB_BUILD_DATE __DATE__
+#endif
+
 GRUB_MOD_LICENSE ("GPLv3+");
 
 #ifdef GRUB_MACHINE_EFI

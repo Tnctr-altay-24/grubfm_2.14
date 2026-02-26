@@ -3026,7 +3026,6 @@ module = {
 module = {
   name = crscreenshot;
   common = lib/crscreenshot/crscreenshot.c;
-  common = lib/crscreenshot/lodepng.c;
   cflags = '$(CFLAGS_POSIX)';
   cppflags = '$(CPPFLAGS_POSIX)';
   enable = efi;
