@@ -3046,21 +3046,21 @@ module = {
 
 module = {
   name = getenv;
-  common = lib/fake_module.c;
+  common = lib/getenv_stub.c;
   enable = efi;
   depends = efivar;
 };
 
 module = {
   name = setenv;
-  common = lib/fake_module.c;
+  common = lib/setenv_stub.c;
   enable = efi;
   depends = efivar;
 };
 
 module = {
   name = gfxterm_menu;
-  common = lib/fake_module.c;
+  common = lib/gfxterm_menu_stub.c;
   depends = gfxmenu;
 };
 

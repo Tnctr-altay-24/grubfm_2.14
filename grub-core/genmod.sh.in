@@ -27,10 +27,10 @@ modname=`echo $infile | sed -e 's@\.module.*$@@'`
 
 if ! grep ^$modname: $moddep >/dev/null; then
     echo "warning: moddep.lst has no dependencies for $modname" >&2
-    exit 0
+    deps=
+else
+    deps=`grep ^$modname: $moddep | sed s@^.*:@@`
 fi
-
-deps=`grep ^$modname: $moddep | sed s@^.*:@@`
 
 # remove old files if any
 rm -f $tmpfile $outfile
@@ -46,11 +46,7 @@ if test x@TARGET_APPLE_LINKER@ != x1; then
     t2=`mktemp "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX"` || exit 1
     for dep in $deps; do printf "$dep\0" >> $t2; done
 
-    if test -n "$deps"; then
-	@TARGET_OBJCOPY@ --add-section .modname=$t1 --add-section .moddeps=$t2 $tmpfile
-    else
-	@TARGET_OBJCOPY@ --add-section .modname=$t1 $tmpfile
-    fi
+    @TARGET_OBJCOPY@ --add-section .modname=$t1 --add-section .moddeps=$t2 $tmpfile
     rm -f $t1 $t2
 
 	if test x@platform@ != xemu; then
@@ -85,11 +81,7 @@ else
 
     for dep in $deps; do echo "char moddep_$dep[] __attribute__ ((section(\"_moddeps, _moddeps\"))) = \"$dep\";" >>$t2; done
 
-    if test -n "$deps"; then
-	@TARGET_CC@ @TARGET_LDFLAGS@ -ffreestanding -nostdlib -o $tmpfile2 $t1 $t2 $tmpfile -Wl,-r
-    else
-	@TARGET_CC@ @TARGET_LDFLAGS@ -ffreestanding -nostdlib -o $tmpfile2 $t1 $tmpfile -Wl,-r
-    fi
+    @TARGET_CC@ @TARGET_LDFLAGS@ -ffreestanding -nostdlib -o $tmpfile2 $t1 $t2 $tmpfile -Wl,-r
     rm -f $t1 $t2 $tmpfile
     mv $tmpfile2 $tmpfile
 
