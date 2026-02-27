@@ -37,57 +37,9 @@
 #include <grub/normal.h>
 #include <grub/i18n.h>
 #include <grub/lua.h>
+#include <grub/port_write.h>
 
 GRUB_MOD_LICENSE ("GPLv3+");
-
-struct dd_fs_block
-{
-  grub_disk_addr_t offset;
-  grub_disk_addr_t length;
-};
-
-static grub_ssize_t
-dd_blocklist_write (grub_file_t file, const char *buf, grub_size_t len)
-{
-  struct dd_fs_block *p;
-  grub_off_t offset;
-  grub_ssize_t ret = 0;
-  grub_disk_t disk = file->device->disk;
-
-  if (!disk || !file->data)
-    return -1;
-
-  if (len > file->size - file->offset)
-    len = file->size - file->offset;
-
-  offset = file->offset;
-  for (p = file->data; p->length && len > 0; p++)
-    {
-      if (offset < (grub_off_t) p->length)
-        {
-          grub_size_t size = len;
-          grub_disk_addr_t block_offset = p->offset + offset;
-          grub_disk_addr_t sector = block_offset >> GRUB_DISK_SECTOR_BITS;
-          grub_off_t sec_off = block_offset & (GRUB_DISK_SECTOR_SIZE - 1);
-
-          if (offset + size > (grub_off_t) p->length)
-            size = p->length - offset;
-
-          if (grub_disk_write (disk, sector, sec_off, size, buf)
-              != GRUB_ERR_NONE)
-            return -1;
-
-          ret += size;
-          len -= size;
-          buf += size;
-          offset += size;
-        }
-      else
-        offset -= p->length;
-    }
-
-  return ret;
-}
 
 static const struct grub_arg_option options[] =
 {
@@ -196,9 +148,9 @@ grub_cmd_dd (grub_extcmd_context_t ctxt, int argc __attribute__ ((unused)),
       return grub_error (GRUB_ERR_BAD_FILENAME, N_("failed to open %s"),
                          state[DD_OF].arg);
     out_size = grub_file_size (out_file);
-    if (!out_file->fs || grub_strcmp (out_file->fs->name, "blocklist") != 0)
+    if (!grub_port_file_prepare_write (out_file))
       return grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
-                         N_("dd output currently requires blocklist file"));
+                         N_("dd write supports mem: or disk-backed files only"));
   }
 
   if (((! in_file) && (! str)) || (! out_file))
@@ -265,7 +217,7 @@ grub_cmd_dd (grub_extcmd_context_t ctxt, int argc __attribute__ ((unused)),
     }
     /* write */
     grub_file_seek (out_file, seek);
-    if (dd_blocklist_write (out_file, (char *) data, copy_bs) < 0)
+    if (grub_port_file_write (out_file, (const char *) data, copy_bs) < 0)
       break;
 
     skip += copy_bs;

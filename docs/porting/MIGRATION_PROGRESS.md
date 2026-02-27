@@ -248,15 +248,32 @@
   - `crscreenshot` 暂改为只编译 `crscreenshot.c`，避免 `lodepng/uefi_wrapper` 与新 EFI API 冲突导致全局构建失败。
 
 3. 占位实现（可编译，待功能回填）
-- `loader/i386/efi/linux.c`：
-  - 当前为 `linuxefi/initrdefi` 兼容占位命令，返回 `NOT_IMPLEMENTED_YET`。
-  - 原因：旧实现依赖的 `linux_kernel_params` 字段、EFI 分配接口与当前主线不兼容。
 - `term/efi/mouse.c`：
   - 当前为 `efi_mouse` 空模块占位（仅 `GRUB_MOD_INIT/FINI`）。
   - 原因：旧实现依赖 `grub_efi_guid_t`、`efi_call_*`、`TRUE` 等旧 EFI 封装接口。
 
 4. 与 `grub_alive` 差异更新
-- `linuxefi/initrdefi`：命令名已保留，但功能尚未回填。
 - `efi_mouse`：模块名已保留，但功能尚未回填。
 - `crscreenshot`：当前为最小占位实现，不含截图编码链路。
 - `gfxterm_menu`：已补同名兼容模块（`fake_module` + 依赖 `gfxmenu`），用于满足 `insmod gfxterm_menu`/模块清单兼容；非测试版 `tests/gfxterm_menu.c` 行为未启用。
+
+## H. 2026-02-27 增量（本轮）
+1. `linuxefi/initrdefi` 真功能回补
+- 文件：`grub-core/loader/i386/efi/linux.c`
+- 实现：将 `linuxefi` 转发到现有 `linux`，将 `initrdefi` 转发到现有 `initrd`。
+- 说明：若目标命令未加载，会先尝试加载 `linux` 模块，再执行命令函数。
+- 结果：不再返回占位错误，直接复用主线 EFI Linux 装载链路。
+
+2. `dd` 与 Lua 文件写入能力回补（私有小库方式）
+- 新增：`include/grub/port_write.h`
+- 设计：以头文件私有实现方式提供写入辅助，避免大改主树与跨模块符号冲突。
+- 能力：
+  - `mem:` / `(mem)` 直接写入；
+  - 普通磁盘文件按当前偏移“惰性转换”为 blocklist 后写入。
+- 接入点：
+  - `grub-core/commands/dd.c`
+  - `grub-core/script/lua/grub_lib.c`
+
+3. 当前差异更新
+- `linuxefi/initrdefi`：已完成真功能兼容（通过主线 `linux/initrd` 执行路径）。
+- `dd/lua`：写入能力已补回（支持 `mem:` 与 disk-backed 文件）；无法映射为 blocklist 的设备仍会返回错误。

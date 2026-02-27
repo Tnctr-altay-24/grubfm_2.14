@@ -37,6 +37,7 @@
 #include <grub/time.h>
 #include <grub/script_sh.h>
 #include <grub/lua.h>
+#include <grub/port_write.h>
 
 static int
 grub_lua_is_memfile (const char *name)
@@ -349,10 +350,14 @@ grub_lua_file_open (lua_State *state)
 
   if (flag && grub_strchr (flag, 'w') && !grub_lua_is_memfile (file->name))
     {
-      grub_file_close (file);
-      grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
-                  "write mode only supports mem: files");
-      return 0;
+      /* For disk-backed files, lazy conversion to blocklist is done on write. */
+      if (!grub_port_file_prepare_write (file))
+        {
+          grub_file_close (file);
+          grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
+                      "write mode supports mem: or disk-backed files");
+          return 0;
+        }
     }
 
   lua_pushlightuserdata (state, file);
@@ -433,13 +438,6 @@ grub_lua_file_write (lua_State *state)
   file = lua_touserdata (state, 1);
   buf = luaL_checklstring (state, 2, &len);
 
-  if (!grub_lua_is_memfile (file->name))
-    {
-      grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
-                  "file_write only supports mem: files");
-      return push_result (state);
-    }
-
   if (file->offset > file->size)
     {
       grub_error (GRUB_ERR_OUT_OF_RANGE, "file offset out of range");
@@ -452,8 +450,11 @@ grub_lua_file_write (lua_State *state)
 
   if (len > 0)
     {
-      grub_memcpy ((grub_uint8_t *) file->data + file->offset, buf, len);
-      file->offset += len;
+      grub_ssize_t ret = grub_port_file_write (file, buf, len);
+      if (ret < 0)
+        return push_result (state);
+      file->offset += ret;
+      len = (size_t) ret;
     }
 
   save_errno (state);
