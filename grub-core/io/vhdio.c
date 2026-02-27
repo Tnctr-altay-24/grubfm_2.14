@@ -36,6 +36,7 @@
 #include <grub/misc.h>
 #include <grub/file.h>
 #include <grub/mm.h>
+#include <grub/types.h>
 
 #pragma GCC diagnostic ignored "-Wcast-align"
 
@@ -119,6 +120,12 @@ static grub_uint32_t log2pot32 (grub_uint32_t x)
          ((x & 0xAAAAAAAA) ? 1 : 0);
 }
 
+static int
+is_power_of_two32 (grub_uint32_t x)
+{
+  return x && ((x & (x - 1)) == 0);
+}
+
 static void vhd_footer_in (VHDFooter *footer)
 {
   footer->dataOffset = grub_swap_bytes64 (footer->dataOffset);
@@ -182,7 +189,8 @@ grub_vhdio_open (grub_file_t io, enum grub_file_type type)
   grub_memset (&footer, 0, sizeof(footer));
   grub_memset (&dynaheader, 0, sizeof(dynaheader));
   grub_file_seek (io, 0);
-  grub_file_read (io, &footer, sizeof (footer));
+  if (grub_file_read (io, &footer, sizeof (footer)) != (grub_ssize_t) sizeof (footer))
+    return io;
   grub_file_seek (io, 0);
   if (grub_memcmp (footer.cookie, "conectix", 8) != 0)
     return io;
@@ -220,8 +228,18 @@ grub_vhdio_open (grub_file_t io, enum grub_file_type type)
   file->not_easily_seekable = io->not_easily_seekable;
 
   grub_file_seek (vhdio->file, footer.dataOffset);
-  grub_file_read (vhdio->file, &dynaheader, sizeof (dynaheader));
+  if (grub_file_read (vhdio->file, &dynaheader, sizeof (dynaheader))
+      != (grub_ssize_t) sizeof (dynaheader))
+    goto fail;
+  if (grub_memcmp (dynaheader.cookie, "cxsparse", 8) != 0)
+    goto fail;
   vhd_header_in (&dynaheader);
+
+  if (!is_power_of_two32 (dynaheader.blockSize) || dynaheader.blockSize < 512)
+    goto fail;
+  if (dynaheader.maxTableEntries == 0)
+    goto fail;
+
   vhdfc->cFileMax = io->size;
   vhdfc->volumeSize = footer.currentSize;
   vhdfc->diskType = footer.diskType;
@@ -230,34 +248,55 @@ grub_vhdio_open (grub_file_t io, enum grub_file_type type)
   vhdfc->blockSizeLog2 = log2pot32 (vhdfc->blockSize);
   vhdfc->batEntries = dynaheader.maxTableEntries;
 
+  grub_uint64_t need_blocks = (vhdfc->volumeSize + vhdfc->blockSize - 1) / vhdfc->blockSize;
+  if (need_blocks > vhdfc->batEntries)
+    goto fail;
+
   grub_uint32_t batSize = (vhdfc->batEntries * 4 + 511)&(-512LL);
+  if (vhdfc->tableOffset + batSize > io->size)
+    goto fail;
+
   vhdfc->blockAllocationTable = grub_malloc (batSize);
+  if (!vhdfc->blockAllocationTable)
+    goto fail;
   vhdfc->blockBitmapSize = vhdfc->blockSize / (512 * 8);
   vhdfc->blockBitmapAndData = grub_malloc (vhdfc->blockBitmapSize
                               + vhdfc->blockSize);
+  if (!vhdfc->blockBitmapAndData)
+    goto fail;
   vhdfc->blockData = vhdfc->blockBitmapAndData + vhdfc->blockBitmapSize;
 
   vhdio->file->offset = vhdfc->tableOffset;
-  grub_file_read(vhdio->file, vhdfc->blockAllocationTable, batSize);
-    vhdfc->currentBlockOffset = -1LL;
+  if (grub_file_read (vhdio->file, vhdfc->blockAllocationTable, batSize)
+      != (grub_ssize_t) batSize)
+    goto fail;
+  vhdfc->currentBlockOffset = -1LL;
 
   file->size = vhdfc->volumeSize;
 
   return file;
+
+fail:
+  grub_vhdio_close (file);
+  grub_free (file);
+  return 0;
 }
 
 static grub_ssize_t
 grub_vhdio_read (grub_file_t file, char *buf, grub_size_t len)
 {
   grub_uint64_t ret = 0;
-  grub_uint64_t rem = len;
+  grub_uint64_t rem;
   grub_vhdio_t vhdio = file->data;
   VHDFileControl *vhdfc = vhdio->vhdfc;
   if (file->offset + len > vhdfc->volumeSize)
     len = (file->offset <= vhdfc->volumeSize) ? vhdfc->volumeSize - file->offset : 0;
+  rem = len;
   while (rem)
   {
     grub_uint32_t blockNumber = file->offset >> vhdfc->blockSizeLog2;
+    if (blockNumber >= vhdfc->batEntries)
+      return grub_error (GRUB_ERR_READ_ERROR, "VHD BAT index out of range");
     grub_uint64_t blockOffset = blockNumber << vhdfc->blockSizeLog2;
     grub_uint32_t offsetInBlock = (grub_uint32_t)(file->offset - blockOffset);
     grub_uint32_t txLen = (rem < vhdfc->blockSize - offsetInBlock) ?
@@ -274,6 +313,9 @@ grub_vhdio_read (grub_file_t file, char *buf, grub_size_t len)
     {
       if (blockOffset != vhdfc->currentBlockOffset)
       {
+        grub_uint64_t blockFileOff = (grub_uint64_t) blockLBA * 512;
+        if (blockFileOff + vhdfc->blockBitmapSize + vhdfc->blockSize > vhdfc->cFileMax)
+          return grub_error (GRUB_ERR_READ_ERROR, "VHD block points outside file");
         vhdio->file->offset = blockLBA * 512;
         grub_uint64_t nread = grub_file_read (vhdio->file,
             vhdfc->blockBitmapAndData, vhdfc->blockBitmapSize + vhdfc->blockSize);
