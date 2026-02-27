@@ -244,6 +244,7 @@ static struct grub_disk_dev grub_loopback_dev =
   };
 
 static grub_extcmd_t cmd;
+static grub_extcmd_t cmd_vhd;
 
 GRUB_MOD_INIT(loopback)
 {
@@ -252,11 +253,16 @@ GRUB_MOD_INIT(loopback)
 			      /* TRANSLATORS: The file itself is not destroyed
 				 or transformed into drive.  */
 			      N_("Make a virtual drive from a file."), options);
+  cmd_vhd = grub_register_extcmd ("vhd", grub_cmd_loopback, 0,
+                                  N_("[-d] [-D] DEVICENAME FILE."),
+                                  N_("Make a virtual drive from a file."),
+                                  options);
   grub_disk_dev_register (&grub_loopback_dev);
 }
 
 GRUB_MOD_FINI(loopback)
 {
   grub_unregister_extcmd (cmd);
+  grub_unregister_extcmd (cmd_vhd);
   grub_disk_dev_unregister (&grub_loopback_dev);
 }

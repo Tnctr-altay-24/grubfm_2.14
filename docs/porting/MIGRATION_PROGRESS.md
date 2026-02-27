@@ -285,3 +285,8 @@
   - 注册 `mouse` 输入终端（左键=Enter，右键=Esc，Y 方向映射上下键）；
   - 回补 `mouse_test` 调试命令。
 - 兼容适配：使用当前主线 EFI 封装（`grub_efi_locate_handle` / `grub_efi_open_protocol` / `grub_efi_close_protocol`）。
+
+5. `vhd` 命令入口回补
+- 文件：`grub-core/disk/loopback.c`
+- 实现：补回 `vhd` extcmd 注册，复用 `loopback` 同一处理函数与参数。
+- 说明：保持与 `grub_alive` 中 `vhd` 作为 loopback 兼容入口的行为一致。
