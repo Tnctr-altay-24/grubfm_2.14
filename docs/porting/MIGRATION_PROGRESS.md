@@ -141,12 +141,12 @@
 - 差异：`grub_alive` 的实际策略注入/状态伪装行为未迁入。
 
 2. `vhd`
-- 现状：`vhd` 模块代码已接入（`io/vhdio.c`），但当前 `command.lst` 未出现 `vhd:` 命令。
-- 差异：命令级入口和 `grub_alive` 可能不一致，需继续补齐导出/注册链路。
+- 现状：`vhd` 命令入口已补回，并会自动加载 `vhd.mod` 后再进入 `loopback` 映射链路。
+- 差异：当前仍以 VHD 过滤器能力为主，VHDX/VDI/VMDK 尚未纳入。
 
 3. Lua 文件写入语义
-- 现状：`grub_lua_file_write` 仅允许 `mem:` 文件；普通文件写入会返回 `NOT_IMPLEMENTED_YET`。
-- 差异：`grub_alive` 的 blocklist 写入路径未等价恢复。
+- 现状：已支持 `mem:` 与 disk-backed 文件写入（通过 blocklist 惰性转换）。
+- 差异：对无法转换为 blocklist 的目标设备，仍会返回错误。
 
 4. hidden menu 启用条件
 - 现状：同时识别 `grubfm_show_hidden` 与 `grub_show_hidden`，默认不显示。
@@ -167,7 +167,7 @@
   - `docs/porting/run-port-selfcheck.sh`（当前基线应为 PASS）
 - 命令存在性抽样：
   - 已确认：`ini_get/lua/grubfm/map/wimboot/ntboot/efi-export-env/efi-load-env/setup_var/dp/efiusb/efiload/getenv/setenv/setkey/getkey/...`
-  - 待补：`vhd` 命令入口
+  - 待补：`crscreenshot` 运行时行为实测（编译已通过）
 
 ## F. 2026-02-26 增量修复
 1. `export` 语义回补（与 `grub_alive` 对齐）
@@ -240,21 +240,21 @@
   - `efi_mouse`、`linuxefi`
   - `getenv`、`setenv`
 
-2. 关键兼容修复
+2. 关键兼容修复（历史记录）
 - `commands/dd.c`
   - 去除对未导出符号 `grub_fs_blocklist` 的硬引用，改为 `fs->name == "blocklist"` 判断。
   - 继续采用本地 `dd_blocklist_write()`（`grub_disk_write`）实现 blocklist 写入。
-- `grub-core/Makefile.core.def`
-  - `crscreenshot` 暂改为只编译 `crscreenshot.c`，避免 `lodepng/uefi_wrapper` 与新 EFI API 冲突导致全局构建失败。
+ - `grub-core/Makefile.core.def`
+  - `crscreenshot` 曾暂改为只编译 `crscreenshot.c`；该限制已在后续回补中移除。
 
-3. 占位实现（可编译，待功能回填）
+3. 占位实现（当时状态，现多项已回填）
 - `term/efi/mouse.c`：
-  - 当前为 `efi_mouse` 空模块占位（仅 `GRUB_MOD_INIT/FINI`）。
+  - 当时为 `efi_mouse` 空模块占位（仅 `GRUB_MOD_INIT/FINI`）。
   - 原因：旧实现依赖 `grub_efi_guid_t`、`efi_call_*`、`TRUE` 等旧 EFI 封装接口。
 
 4. 与 `grub_alive` 差异更新
-- `efi_mouse`：模块名已保留，但功能尚未回填。
-- `crscreenshot`：当前为最小占位实现，不含截图编码链路。
+- `efi_mouse`：已回填真功能。
+- `crscreenshot`：已回填完整编码链路并恢复 `lodepng` 构建。
 - `gfxterm_menu`：已补同名兼容模块（`fake_module` + 依赖 `gfxmenu`），用于满足 `insmod gfxterm_menu`/模块清单兼容；非测试版 `tests/gfxterm_menu.c` 行为未启用。
 
 ## H. 2026-02-27 增量（本轮）
@@ -293,3 +293,17 @@
   - `vhd` 命令执行时先确保 `vhd.mod` 已加载（注册 `GRUB_FILE_FILTER_VHDIO`）；
   - 之后复用 `loopback` 同一处理函数与参数。
 - 说明：`loopback` 负责映射；VHD 结构解析由 `vhdio` 过滤器负责。
+
+6. `crscreenshot` 真功能回补
+- 文件：
+  - `grub-core/lib/crscreenshot/crscreenshot.c`
+  - `grub-core/lib/crscreenshot/uefi_wrapper.h`
+  - `grub-core/Makefile.core.def`
+  - `include/grub/efi/sfs.h`
+- 实现：
+  - 回迁 `grub_alive` 的 `crscreenshot` 主体逻辑；
+  - 恢复 `lodepng.c` 编译链；
+  - 补充 EFI 调用兼容宏与调用约定，修复旧 `efi_call_*` 接口差异。
+- 兼容修正：
+  - 修复 `sfs.h` 中 `grub_efi_guid_t` 类型引用为当前主线可用类型；
+  - `uefi_wrapper` 增加 `EFIAPI/TRUE/FALSE/efi_call_*` 适配层。

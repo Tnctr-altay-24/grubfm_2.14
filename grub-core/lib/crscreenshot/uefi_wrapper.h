@@ -43,13 +43,16 @@ typedef grub_efi_status_t       EFI_STATUS;
 typedef void                    VOID;
 typedef grub_efi_handle_t       EFI_HANDLE;
 typedef grub_efi_event_t        EFI_EVENT;
-typedef grub_efi_guid_t         EFI_GUID;
+typedef grub_guid_t             EFI_GUID;
 typedef grub_efi_input_key_t    EFI_INPUT_KEY;
 typedef grub_efi_time_t         EFI_TIME;
 typedef grub_efi_key_data_t     EFI_KEY_DATA;
 
 #define IN
 #define OUT
+#define EFIAPI __grub_efi_api
+#define TRUE 1
+#define FALSE 0
 
 #define  BIT0     0x00000001
 #define  BIT1     0x00000002
@@ -119,6 +122,14 @@ typedef grub_efi_key_data_t     EFI_KEY_DATA;
 #define SCAN_EJECT                0x0106
 
 #define EFI_ERROR(x) ((x) != GRUB_EFI_SUCCESS)
+
+#define efi_call_1(func,a1) func ((a1))
+#define efi_call_2(func,a1,a2) func ((a1), (a2))
+#define efi_call_3(func,a1,a2,a3) func ((a1), (a2), (a3))
+#define efi_call_4(func,a1,a2,a3,a4) func ((a1), (a2), (a3), (a4))
+#define efi_call_5(func,a1,a2,a3,a4,a5) func ((a1), (a2), (a3), (a4), (a5))
+#define efi_call_10(func,a1,a2,a3,a4,a5,a6,a7,a8,a9,a10) \
+  func ((a1), (a2), (a3), (a4), (a5), (a6), (a7), (a8), (a9), (a10))
 
 typedef grub_efi_simple_text_input_ex_interface_t EFI_SIMPLE_TEXT_INPUT_EX_PROTOCOL;
 

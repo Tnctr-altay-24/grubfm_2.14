@@ -73,11 +73,11 @@ struct grub_efi_file_protocol
   grub_efi_status_t (*set_pos) (struct grub_efi_file_protocol *this,
                                 grub_efi_uint64_t pos);
   grub_efi_status_t (*get_info) (struct grub_efi_file_protocol *this,
-                                 grub_efi_guid_t *information_type,
+                                 grub_guid_t *information_type,
                                  grub_efi_uintn_t *buffer_size,
                                  void *buffer);
   grub_efi_status_t (*set_info) (struct grub_efi_file_protocol *this,
-                                 grub_efi_guid_t *information_type,
+                                 grub_guid_t *information_type,
                                  grub_efi_uintn_t buffer_size,
                                  void *buffer);
   grub_efi_status_t (*flush) (struct grub_efi_file_protocol *this);
