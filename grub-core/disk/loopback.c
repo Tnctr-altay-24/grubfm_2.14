@@ -253,6 +253,12 @@ grub_cmd_vhd (grub_extcmd_context_t ctxt, int argc, char **args)
       grub_dl_load ("vhdx");
       grub_errno = GRUB_ERR_NONE;
     }
+  if (!grub_file_filters[GRUB_FILE_FILTER_QCOW2IO])
+    {
+      grub_errno = GRUB_ERR_NONE;
+      grub_dl_load ("qcow2");
+      grub_errno = GRUB_ERR_NONE;
+    }
   if (!grub_file_filters[GRUB_FILE_FILTER_VMDKIO])
     {
       grub_errno = GRUB_ERR_NONE;
@@ -268,6 +274,7 @@ grub_cmd_vhd (grub_extcmd_context_t ctxt, int argc, char **args)
   parser_ready =
       (grub_file_filters[GRUB_FILE_FILTER_VHDIO] != 0)
    || (grub_file_filters[GRUB_FILE_FILTER_VHDXIO] != 0)
+   || (grub_file_filters[GRUB_FILE_FILTER_QCOW2IO] != 0)
    || (grub_file_filters[GRUB_FILE_FILTER_VMDKIO] != 0)
    || (grub_file_filters[GRUB_FILE_FILTER_FIXED_VDIIO] != 0);
 

@@ -1193,6 +1193,11 @@ module = {
 };
 
 module = {
+  name = qcow2;
+  common = io/qcow2io.c;
+};
+
+module = {
   name = vhdx;
   common = io/vhdxio.c;
 };
