@@ -1193,6 +1193,21 @@ module = {
 };
 
 module = {
+  name = vhdx;
+  common = io/vhdxio.c;
+};
+
+module = {
+  name = vmdk;
+  common = io/vmdkio.c;
+};
+
+module = {
+  name = fixed_vdi;
+  common = io/fixed_vdi.c;
+};
+
+module = {
   name = vhd;
   common = io/vhdio.c;
 };

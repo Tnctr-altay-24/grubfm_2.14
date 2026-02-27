@@ -236,16 +236,44 @@ fail:
 static grub_err_t
 grub_cmd_vhd (grub_extcmd_context_t ctxt, int argc, char **args)
 {
+  int parser_ready = 0;
+
+  /* Unified virtual-disk entrypoint:
+     keep "vhd" as generic command and load all known parsers. */
+  if (!grub_file_filters[GRUB_FILE_FILTER_FIXED_VDIIO])
+    {
+      /* Optional parser. Keep command usable even if module isn't built. */
+      grub_errno = GRUB_ERR_NONE;
+      grub_dl_load ("fixed_vdi");
+      grub_errno = GRUB_ERR_NONE;
+    }
+  if (!grub_file_filters[GRUB_FILE_FILTER_VHDXIO])
+    {
+      grub_errno = GRUB_ERR_NONE;
+      grub_dl_load ("vhdx");
+      grub_errno = GRUB_ERR_NONE;
+    }
+  if (!grub_file_filters[GRUB_FILE_FILTER_VMDKIO])
+    {
+      grub_errno = GRUB_ERR_NONE;
+      grub_dl_load ("vmdk");
+      grub_errno = GRUB_ERR_NONE;
+    }
   if (!grub_file_filters[GRUB_FILE_FILTER_VHDIO])
     {
-      if (!grub_dl_load ("vhd") && grub_errno == GRUB_ERR_NONE)
-        grub_error (GRUB_ERR_UNKNOWN_COMMAND,
-                    N_("failed to load VHD parser module"));
-
-      if (!grub_file_filters[GRUB_FILE_FILTER_VHDIO])
-        return grub_error (GRUB_ERR_UNKNOWN_COMMAND,
-                           N_("VHD parser module is unavailable"));
+      grub_dl_load ("vhd");
+      grub_errno = GRUB_ERR_NONE;
     }
+
+  parser_ready =
+      (grub_file_filters[GRUB_FILE_FILTER_VHDIO] != 0)
+   || (grub_file_filters[GRUB_FILE_FILTER_VHDXIO] != 0)
+   || (grub_file_filters[GRUB_FILE_FILTER_VMDKIO] != 0)
+   || (grub_file_filters[GRUB_FILE_FILTER_FIXED_VDIIO] != 0);
+
+  if (!parser_ready)
+    return grub_error (GRUB_ERR_UNKNOWN_COMMAND,
+                       N_("no virtual-disk parser module is available"));
 
   return grub_cmd_loopback (ctxt, argc, args);
 }
