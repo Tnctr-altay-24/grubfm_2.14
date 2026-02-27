@@ -18,7 +18,6 @@
  */
 
 #include <grub/dl.h>
-#include <grub/env.h>
 #include <grub/misc.h>
 #include <grub/file.h>
 #include <grub/disk.h>
@@ -239,25 +238,6 @@ grub_cmd_vhd (grub_extcmd_context_t ctxt, int argc, char **args)
 {
   int parser_ready = 0;
 
-  /* Unified virtual-disk entrypoint. In target builds we can autoload
-     parser modules; in GRUB_UTIL builds keep link-time dependencies minimal. */
-#ifndef GRUB_UTIL
-  if ((grub_file_filters[GRUB_FILE_FILTER_VHDIO] == 0)
-      && (grub_file_filters[GRUB_FILE_FILTER_VHDXIO] == 0)
-      && (grub_file_filters[GRUB_FILE_FILTER_QCOW2IO] == 0)
-      && (grub_file_filters[GRUB_FILE_FILTER_VMDKIO] == 0)
-      && (grub_file_filters[GRUB_FILE_FILTER_FIXED_VDIIO] == 0))
-    {
-      const char *prefix = grub_env_get ("prefix");
-      if (prefix && *prefix)
-        {
-          grub_errno = GRUB_ERR_NONE;
-          grub_dl_load ("vhd");
-          grub_errno = GRUB_ERR_NONE;
-        }
-    }
-#endif
-
   parser_ready =
       (grub_file_filters[GRUB_FILE_FILTER_VHDIO] != 0)
    || (grub_file_filters[GRUB_FILE_FILTER_VHDXIO] != 0)
@@ -267,7 +247,7 @@ grub_cmd_vhd (grub_extcmd_context_t ctxt, int argc, char **args)
 
   if (!parser_ready)
     return grub_error (GRUB_ERR_UNKNOWN_COMMAND,
-                       N_("no virtual-disk parser module is available"));
+                       N_("no virtual-disk parser module is available; run `insmod vhd'"));
 
   return grub_cmd_loopback (ctxt, argc, args);
 }
