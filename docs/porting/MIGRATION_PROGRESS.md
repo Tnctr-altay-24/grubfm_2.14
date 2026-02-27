@@ -277,3 +277,11 @@
 3. 当前差异更新
 - `linuxefi/initrdefi`：已完成真功能兼容（通过主线 `linux/initrd` 执行路径）。
 - `dd/lua`：写入能力已补回（支持 `mem:` 与 disk-backed 文件）；无法映射为 blocklist 的设备仍会返回错误。
+
+4. `efi_mouse` 真功能回填
+- 文件：`grub-core/term/efi/mouse.c`
+- 实现：
+  - 回补 UEFI `SimplePointer` 协议枚举；
+  - 注册 `mouse` 输入终端（左键=Enter，右键=Esc，Y 方向映射上下键）；
+  - 回补 `mouse_test` 调试命令。
+- 兼容适配：使用当前主线 EFI 封装（`grub_efi_locate_handle` / `grub_efi_open_protocol` / `grub_efi_close_protocol`）。
