@@ -288,5 +288,8 @@
 
 5. `vhd` 命令入口回补
 - 文件：`grub-core/disk/loopback.c`
-- 实现：补回 `vhd` extcmd 注册，复用 `loopback` 同一处理函数与参数。
-- 说明：保持与 `grub_alive` 中 `vhd` 作为 loopback 兼容入口的行为一致。
+- 实现：
+  - 补回 `vhd` extcmd 注册；
+  - `vhd` 命令执行时先确保 `vhd.mod` 已加载（注册 `GRUB_FILE_FILTER_VHDIO`）；
+  - 之后复用 `loopback` 同一处理函数与参数。
+- 说明：`loopback` 负责映射；VHD 结构解析由 `vhdio` 过滤器负责。

@@ -138,6 +138,23 @@ fail:
   return ret;
 }
 
+static grub_err_t
+grub_cmd_vhd (grub_extcmd_context_t ctxt, int argc, char **args)
+{
+  if (!grub_file_filters[GRUB_FILE_FILTER_VHDIO])
+    {
+      if (!grub_dl_load ("vhd") && grub_errno == GRUB_ERR_NONE)
+        grub_error (GRUB_ERR_UNKNOWN_COMMAND,
+                    N_("failed to load VHD parser module"));
+
+      if (!grub_file_filters[GRUB_FILE_FILTER_VHDIO])
+        return grub_error (GRUB_ERR_UNKNOWN_COMMAND,
+                           N_("VHD parser module is unavailable"));
+    }
+
+  return grub_cmd_loopback (ctxt, argc, args);
+}
+
 
 static int
 grub_loopback_iterate (grub_disk_dev_iterate_hook_t hook, void *hook_data,
@@ -253,7 +270,7 @@ GRUB_MOD_INIT(loopback)
 			      /* TRANSLATORS: The file itself is not destroyed
 				 or transformed into drive.  */
 			      N_("Make a virtual drive from a file."), options);
-  cmd_vhd = grub_register_extcmd ("vhd", grub_cmd_loopback, 0,
+  cmd_vhd = grub_register_extcmd ("vhd", grub_cmd_vhd, 0,
                                   N_("[-d] [-D] DEVICENAME FILE."),
                                   N_("Make a virtual drive from a file."),
                                   options);
