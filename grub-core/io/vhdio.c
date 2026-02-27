@@ -42,6 +42,8 @@
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
+grub_file_t grub_vhdio_open_filter (grub_file_t io, enum grub_file_type type);
+
 typedef struct
 {
   grub_uint8_t cookie[8];//string conectix
@@ -149,6 +151,12 @@ typedef struct grub_vhdio *grub_vhdio_t;
 
 static struct grub_fs grub_vhdio_fs;
 
+/* Additional virtual-disk parsers integrated into vhd.mod.  */
+grub_file_t grub_fixed_vdiio_open_filter (grub_file_t io, enum grub_file_type type);
+grub_file_t grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type);
+grub_file_t grub_vmdkio_open_filter (grub_file_t io, enum grub_file_type type);
+grub_file_t grub_qcow2io_open_filter (grub_file_t io, enum grub_file_type type);
+
 static grub_err_t
 grub_vhdio_close (grub_file_t file)
 {
@@ -171,8 +179,8 @@ grub_vhdio_close (grub_file_t file)
 }
 
 
-static grub_file_t
-grub_vhdio_open (grub_file_t io, enum grub_file_type type)
+grub_file_t
+grub_vhdio_open_filter (grub_file_t io, enum grub_file_type type)
 {
   grub_file_t file;
   grub_vhdio_t vhdio;
@@ -346,10 +354,18 @@ static struct grub_fs grub_vhdio_fs = {
 
 GRUB_MOD_INIT(vhd)
 {
-  grub_file_filter_register (GRUB_FILE_FILTER_VHDIO, grub_vhdio_open);
+  grub_file_filter_register (GRUB_FILE_FILTER_QCOW2IO, grub_qcow2io_open_filter);
+  grub_file_filter_register (GRUB_FILE_FILTER_VHDXIO, grub_vhdxio_open_filter);
+  grub_file_filter_register (GRUB_FILE_FILTER_VMDKIO, grub_vmdkio_open_filter);
+  grub_file_filter_register (GRUB_FILE_FILTER_FIXED_VDIIO, grub_fixed_vdiio_open_filter);
+  grub_file_filter_register (GRUB_FILE_FILTER_VHDIO, grub_vhdio_open_filter);
 }
 
 GRUB_MOD_FINI(vhd)
 {
+  grub_file_filter_unregister (GRUB_FILE_FILTER_QCOW2IO);
+  grub_file_filter_unregister (GRUB_FILE_FILTER_VHDXIO);
+  grub_file_filter_unregister (GRUB_FILE_FILTER_VMDKIO);
+  grub_file_filter_unregister (GRUB_FILE_FILTER_FIXED_VDIIO);
   grub_file_filter_unregister (GRUB_FILE_FILTER_VHDIO);
 }

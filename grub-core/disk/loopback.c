@@ -241,31 +241,11 @@ grub_cmd_vhd (grub_extcmd_context_t ctxt, int argc, char **args)
   /* Unified virtual-disk entrypoint. In target builds we can autoload
      parser modules; in GRUB_UTIL builds keep link-time dependencies minimal. */
 #ifndef GRUB_UTIL
-  if (!grub_file_filters[GRUB_FILE_FILTER_FIXED_VDIIO])
-    {
-      grub_errno = GRUB_ERR_NONE;
-      grub_dl_load ("fixed_vdi");
-      grub_errno = GRUB_ERR_NONE;
-    }
-  if (!grub_file_filters[GRUB_FILE_FILTER_VHDXIO])
-    {
-      grub_errno = GRUB_ERR_NONE;
-      grub_dl_load ("vhdx");
-      grub_errno = GRUB_ERR_NONE;
-    }
-  if (!grub_file_filters[GRUB_FILE_FILTER_QCOW2IO])
-    {
-      grub_errno = GRUB_ERR_NONE;
-      grub_dl_load ("qcow2");
-      grub_errno = GRUB_ERR_NONE;
-    }
-  if (!grub_file_filters[GRUB_FILE_FILTER_VMDKIO])
-    {
-      grub_errno = GRUB_ERR_NONE;
-      grub_dl_load ("vmdk");
-      grub_errno = GRUB_ERR_NONE;
-    }
-  if (!grub_file_filters[GRUB_FILE_FILTER_VHDIO])
+  if ((grub_file_filters[GRUB_FILE_FILTER_VHDIO] == 0)
+      && (grub_file_filters[GRUB_FILE_FILTER_VHDXIO] == 0)
+      && (grub_file_filters[GRUB_FILE_FILTER_QCOW2IO] == 0)
+      && (grub_file_filters[GRUB_FILE_FILTER_VMDKIO] == 0)
+      && (grub_file_filters[GRUB_FILE_FILTER_FIXED_VDIIO] == 0))
     {
       grub_errno = GRUB_ERR_NONE;
       grub_dl_load ("vhd");

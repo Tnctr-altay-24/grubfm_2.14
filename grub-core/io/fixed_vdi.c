@@ -23,6 +23,8 @@
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
+grub_file_t grub_fixed_vdiio_open_filter (grub_file_t io, enum grub_file_type type);
+
 #define VDI_IMAGE_FILE_INFO   "<<< Oracle VM VirtualBox Disk Image >>>\n"
 #define VDI_OFFSET            (2 * 1048576)
 #define VDI_IMAGE_SIGNATURE   0xbeda107f
@@ -54,8 +56,8 @@ grub_fixed_vdiio_close (grub_file_t file)
   return grub_errno;
 }
 
-static grub_file_t
-grub_fixed_vdiio_open (grub_file_t io, enum grub_file_type type)
+grub_file_t
+grub_fixed_vdiio_open_filter (grub_file_t io, enum grub_file_type type)
 {
   grub_file_t file;
   grub_fixed_vdiio_t fixed_vdiio;
@@ -125,14 +127,3 @@ static struct grub_fs grub_fixed_vdiio_fs = {
   .fs_label = 0,
   .next = 0
 };
-
-GRUB_MOD_INIT(fixed_vdi)
-{
-  grub_file_filter_register (GRUB_FILE_FILTER_FIXED_VDIIO,
-                             grub_fixed_vdiio_open);
-}
-
-GRUB_MOD_FINI(fixed_vdi)
-{
-  grub_file_filter_unregister (GRUB_FILE_FILTER_FIXED_VDIIO);
-}

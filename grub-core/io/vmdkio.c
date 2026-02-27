@@ -12,6 +12,8 @@
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
+grub_file_t grub_vmdkio_open_filter (grub_file_t io, enum grub_file_type type);
+
 #define VMDK_SPARSE_MAGIC            0x564d444bU /* "KDMV" on disk */
 #define VMDK_SECTOR_SIZE             512U
 
@@ -142,8 +144,8 @@ vmdk_load_gt (struct vmdk_ctx *ctx, grub_uint32_t gt_index)
   return 1;
 }
 
-static grub_file_t
-grub_vmdkio_open (grub_file_t io, enum grub_file_type type)
+grub_file_t
+grub_vmdkio_open_filter (grub_file_t io, enum grub_file_type type)
 {
   grub_uint8_t hdr_raw[512];
   struct vmdk_sparse_header h;
@@ -364,13 +366,3 @@ static struct grub_fs grub_vmdkio_fs = {
   .fs_label = 0,
   .next = 0
 };
-
-GRUB_MOD_INIT(vmdk)
-{
-  grub_file_filter_register (GRUB_FILE_FILTER_VMDKIO, grub_vmdkio_open);
-}
-
-GRUB_MOD_FINI(vmdk)
-{
-  grub_file_filter_unregister (GRUB_FILE_FILTER_VMDKIO);
-}

@@ -12,6 +12,8 @@
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
+grub_file_t grub_qcow2io_open_filter (grub_file_t io, enum grub_file_type type);
+
 #define QCOW2_MAGIC                    0x514649fbU
 
 #define QCOW2_OFLAG_COMPRESSED         (1ULL << 62)
@@ -122,8 +124,8 @@ qcow2_load_l2 (struct qcow2_ctx *ctx, grub_uint64_t l2_off)
   return 1;
 }
 
-static grub_file_t
-grub_qcow2io_open (grub_file_t io, enum grub_file_type type)
+grub_file_t
+grub_qcow2io_open_filter (grub_file_t io, enum grub_file_type type)
 {
   grub_uint8_t hraw[104];
   struct qcow2_header h;
@@ -354,13 +356,3 @@ static struct grub_fs grub_qcow2io_fs = {
   .fs_label = 0,
   .next = 0
 };
-
-GRUB_MOD_INIT(qcow2)
-{
-  grub_file_filter_register (GRUB_FILE_FILTER_QCOW2IO, grub_qcow2io_open);
-}
-
-GRUB_MOD_FINI(qcow2)
-{
-  grub_file_filter_unregister (GRUB_FILE_FILTER_QCOW2IO);
-}

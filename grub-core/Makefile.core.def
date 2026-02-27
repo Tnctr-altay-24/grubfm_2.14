@@ -1193,28 +1193,12 @@ module = {
 };
 
 module = {
-  name = qcow2;
-  common = io/qcow2io.c;
-};
-
-module = {
-  name = vhdx;
-  common = io/vhdxio.c;
-};
-
-module = {
-  name = vmdk;
-  common = io/vmdkio.c;
-};
-
-module = {
-  name = fixed_vdi;
-  common = io/fixed_vdi.c;
-};
-
-module = {
   name = vhd;
   common = io/vhdio.c;
+  common = io/fixed_vdi.c;
+  common = io/vhdxio.c;
+  common = io/vmdkio.c;
+  common = io/qcow2io.c;
 };
 
 module = {

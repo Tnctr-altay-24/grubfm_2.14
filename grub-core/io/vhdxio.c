@@ -12,6 +12,8 @@
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
+grub_file_t grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type);
+
 #define VHDX_FILE_ID_OFF              0x00000
 #define VHDX_HEADER1_OFF              0x10000
 #define VHDX_HEADER2_OFF              0x20000
@@ -441,8 +443,8 @@ load_bat (grub_file_t io, const struct vhdx_region_entry *bat_r,
   return GRUB_ERR_NONE;
 }
 
-static grub_file_t
-grub_vhdxio_open (grub_file_t io, enum grub_file_type type)
+grub_file_t
+grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type)
 {
   grub_file_t file = 0;
   grub_vhdxio_t vhdxio = 0;
@@ -672,13 +674,3 @@ static struct grub_fs grub_vhdxio_fs = {
   .fs_label = 0,
   .next = 0
 };
-
-GRUB_MOD_INIT(vhdx)
-{
-  grub_file_filter_register (GRUB_FILE_FILTER_VHDXIO, grub_vhdxio_open);
-}
-
-GRUB_MOD_FINI(vhdx)
-{
-  grub_file_filter_unregister (GRUB_FILE_FILTER_VHDXIO);
-}
