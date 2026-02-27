@@ -425,20 +425,31 @@ static int
 lua_disk_bootable (lua_State *state)
 {
   grub_disk_t disk;
+  grub_partition_t p;
   int boot = 0;
+
   luaL_checktype (state, 1, LUA_TLIGHTUSERDATA);
   disk = lua_touserdata (state, 1);
-  if (disk->partition &&
-      disk->partition->msdostype != GRUB_PC_PARTITION_TYPE_GPT_DISK &&
-      grub_strcmp (disk->partition->partmap->name, "msdos") == 0)
-  {
-    boot = 0;
-  }
-  else if (disk->partition &&
-           grub_strcmp (disk->partition->partmap->name, "gpt") == 0)
-  {
-    boot = 0;
-  }
+  p = disk ? disk->partition : 0;
+
+  if (p && p->partmap && grub_strcmp (p->partmap->name, "msdos") == 0)
+    {
+      struct grub_msdos_partition_mbr mbr;
+      if (p->index >= 0 && p->index < 4
+          && grub_disk_read (disk, p->offset, 0, sizeof (mbr), &mbr) == 0)
+        boot = (mbr.entries[p->index].flag & 0x80) ? 1 : 0;
+      grub_errno = GRUB_ERR_NONE;
+    }
+  else if (p && p->partmap && grub_strcmp (p->partmap->name, "gpt") == 0)
+    {
+      struct grub_gpt_partentry entry;
+      grub_packed_guid_t efi_guid = GRUB_GPT_PARTITION_TYPE_EFI_SYSTEM;
+      if (grub_disk_read (disk, p->offset, p->index, sizeof (entry), &entry) == 0
+          && grub_memcmp (&entry.type, &efi_guid, sizeof (efi_guid)) == 0)
+        boot = 1;
+      grub_errno = GRUB_ERR_NONE;
+    }
+
   lua_pushboolean (state, boot);
   return 1;
 }

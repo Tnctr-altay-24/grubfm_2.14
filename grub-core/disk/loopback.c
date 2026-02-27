@@ -25,6 +25,7 @@
 #include <grub/extcmd.h>
 #include <grub/i18n.h>
 #include <grub/safemath.h>
+#include <grub/port_write.h>
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
@@ -45,9 +46,103 @@ static const struct grub_arg_option options[] =
     /* TRANSLATORS: The disk is simply removed from the list of available ones,
        not wiped, avoid to scare user.  */
     {"delete", 'd', 0, N_("Delete the specified loopback drive."), 0, 0},
+    {"mem", 'm', 0, N_("Copy to RAM."), 0, 0},
+    {"blocklist", 'l', 0, N_("Convert to blocklist."), 0, 0},
     {"decompress", 'D', 0, N_("Transparently decompress backing file."), 0, 0},
     {0, 0, 0, 0, 0, 0}
   };
+
+static int
+loop_is_mem_name (const char *name)
+{
+  return name && (grub_strncmp (name, "mem:", 4) == 0
+                  || grub_strncmp (name, "(mem)", 5) == 0);
+}
+
+static grub_file_t
+loop_file_open (const char *name, int mem, int bl, enum grub_file_type type)
+{
+  grub_file_t file = 0;
+  grub_size_t size = 0;
+
+  file = grub_file_open (name, type);
+  if (!file)
+    return 0;
+
+  size = grub_file_size (file);
+  if (bl && !grub_port_file_prepare_write (file))
+    {
+      grub_file_close (file);
+      return 0;
+    }
+
+  if (mem)
+    {
+      void *addr = 0;
+      char newname[100];
+      grub_ssize_t readlen;
+
+      addr = grub_malloc (size + GRUB_DISK_SECTOR_SIZE - 1);
+      if (!addr)
+        {
+          grub_file_close (file);
+          return 0;
+        }
+
+      grub_file_seek (file, 0);
+      readlen = grub_file_read (file, addr, size);
+      grub_file_close (file);
+      if (readlen < 0 || (grub_size_t) readlen != size)
+        {
+          grub_free (addr);
+          return 0;
+        }
+
+      grub_memset ((grub_uint8_t *) addr + size, 0, GRUB_DISK_SECTOR_SIZE - 1);
+      grub_snprintf (newname, sizeof (newname), "mem:%p:size:%llu",
+                     addr, (unsigned long long) size);
+      file = grub_file_open (newname, type);
+      if (!file)
+        grub_free (addr);
+    }
+
+  return file;
+}
+
+static void
+loop_file_close (grub_file_t file)
+{
+  if (!file)
+    return;
+  if (loop_is_mem_name (file->name) && file->data)
+    grub_free (file->data);
+  grub_file_close (file);
+}
+
+static grub_err_t
+loop_file_write (grub_file_t file, const void *buf, grub_size_t len, grub_off_t offset)
+{
+  grub_ssize_t written;
+
+  if (!file)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("invalid loopback file"));
+
+  if (!grub_port_file_prepare_write (file))
+    return grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
+                       N_("loopback write supports mem: or disk-backed files only"));
+
+  grub_file_seek (file, offset);
+  if (grub_errno != GRUB_ERR_NONE)
+    return grub_errno;
+
+  written = grub_port_file_write (file, (const char *) buf, len);
+  if (written < 0)
+    return grub_errno ? grub_errno
+                      : grub_error (GRUB_ERR_WRITE_ERROR, N_("loopback write failed"));
+  if ((grub_size_t) written != len)
+    return grub_error (GRUB_ERR_WRITE_ERROR, N_("short write to loopback file"));
+  return GRUB_ERR_NONE;
+}
 
 /* Delete the loopback device NAME.  */
 static grub_err_t
@@ -72,7 +167,7 @@ delete_loopback (const char *name)
   *prev = dev->next;
 
   grub_free (dev->devname);
-  grub_file_close (dev->file);
+  loop_file_close (dev->file);
   grub_free (dev);
 
   return 0;
@@ -95,7 +190,7 @@ grub_cmd_loopback (grub_extcmd_context_t ctxt, int argc, char **args)
   if (state[0].set)
     return delete_loopback (args[0]);
 
-  if (!state[1].set)
+  if (!state[3].set)
     type |= GRUB_FILE_TYPE_NO_DECOMPRESS;
 
   if (argc < 2)
@@ -106,7 +201,7 @@ grub_cmd_loopback (grub_extcmd_context_t ctxt, int argc, char **args)
     if (grub_strcmp (newdev->devname, args[0]) == 0)
       return grub_error (GRUB_ERR_BAD_ARGUMENT, "device name already exists");
 
-  file = grub_file_open (args[1], type);
+  file = loop_file_open (args[1], state[1].set, state[2].set, type);
   if (! file)
     return grub_errno;
 
@@ -134,7 +229,7 @@ grub_cmd_loopback (grub_extcmd_context_t ctxt, int argc, char **args)
 
 fail:
   ret = grub_errno;
-  grub_file_close (file);
+  loop_file_close (file);
   return ret;
 }
 
@@ -239,13 +334,15 @@ grub_loopback_read (grub_disk_t disk, grub_disk_addr_t sector,
 }
 
 static grub_err_t
-grub_loopback_write (grub_disk_t disk __attribute ((unused)),
-		     grub_disk_addr_t sector __attribute ((unused)),
-		     grub_size_t size __attribute ((unused)),
-		     const char *buf __attribute ((unused)))
+grub_loopback_write (grub_disk_t disk,
+		     grub_disk_addr_t sector,
+		     grub_size_t size,
+		     const char *buf)
 {
-  return grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
-		     "loopback write is not supported");
+  grub_file_t file = ((struct grub_loopback *) disk->data)->file;
+  return loop_file_write (file, buf,
+                          size << GRUB_DISK_SECTOR_BITS,
+                          sector << GRUB_DISK_SECTOR_BITS);
 }
 
 static struct grub_disk_dev grub_loopback_dev =

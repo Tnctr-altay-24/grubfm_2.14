@@ -137,8 +137,8 @@
 ## D. 与 grub_alive 行为仍不一致（重点）
 
 1. `sbpolicy` / `fucksb`
-- 现状：占位模块，仅保留命令与函数签名；核心逻辑空实现并返回 `NOT_IMPLEMENTED_YET`。
-- 差异：`grub_alive` 的实际策略注入/状态伪装行为未迁入。
+- 现状：命令入口与主体逻辑已接入，包含状态查询/安装/卸载与 `fucksb` 相关开关逻辑。
+- 差异：该组功能风险较高，尚未做完整行为矩阵回归。
 
 2. `vhd`
 - 现状：`vhd` 命令入口已补回，并会自动加载 `vhd.mod` 后再进入 `loopback` 映射链路。
@@ -159,6 +159,10 @@
 6. `map/wimboot/ntboot` 细项参数
 - 现状：主链路可构建并具备基础功能。
 - 差异：个别参数边界行为、错误码和输出文案仍可能与 `grub_alive` 不一致（需参数矩阵回归）。
+
+7. `loopback` 兼容选项
+- 现状：已回补 `--mem/-m`、`--blocklist/-l` 与写入路径。
+- 差异：针对非常规设备/文件系统的写入仍受 blocklist 可转换性限制。
 
 ## E. 验证记录
 - 构建：
@@ -307,3 +311,22 @@
 - 兼容修正：
   - 修复 `sfs.h` 中 `grub_efi_guid_t` 类型引用为当前主线可用类型；
   - `uefi_wrapper` 增加 `EFIAPI/TRUE/FALSE/efi_call_*` 适配层。
+
+## I. 2026-02-27 收口修复（本轮）
+1. `dd` Lua 磁盘引导标识判断修复
+- 文件：`grub-core/commands/dd.c`
+- 修复：
+  - 回补 `disk.bootable()` 逻辑，不再固定返回 false；
+  - 通过读取 MBR/GPT 分区表项恢复与旧行为一致的可启动判定。
+
+2. `loopback` 兼容能力回补
+- 文件：`grub-core/disk/loopback.c`
+- 修复：
+  - 回补 `--mem/-m`、`--blocklist/-l` 选项；
+  - 回补 loopback 写入路径（`mem:` 与 blocklist 可转换文件）。
+- 说明：
+  - `vhd` 入口仍保持自动加载 `vhd.mod` 后复用 loopback 路径。
+
+3. `grubfm_about` 作者信息补充
+- 文件：`grub-core/grubfm/fm.c`
+- 调整：关于页新增作者行 `Authors: a1ive, Aromatic`。
