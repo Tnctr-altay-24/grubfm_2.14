@@ -454,6 +454,8 @@ grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type)
   grub_uint8_t sig[8];
   grub_uint32_t param_bits = 0;
 
+  if ((type & GRUB_FILE_TYPE_MASK) != GRUB_FILE_TYPE_LOOPBACK)
+    return io;
   if (type & GRUB_FILE_TYPE_NO_DECOMPRESS)
     return io;
   if (io->size < (grub_off_t) (VHDX_REGION_TBL2_OFF + VHDX_HEADER_BLOCK_SIZE))

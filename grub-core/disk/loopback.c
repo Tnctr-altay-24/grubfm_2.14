@@ -18,6 +18,7 @@
  */
 
 #include <grub/dl.h>
+#include <grub/env.h>
 #include <grub/misc.h>
 #include <grub/file.h>
 #include <grub/disk.h>
@@ -247,9 +248,13 @@ grub_cmd_vhd (grub_extcmd_context_t ctxt, int argc, char **args)
       && (grub_file_filters[GRUB_FILE_FILTER_VMDKIO] == 0)
       && (grub_file_filters[GRUB_FILE_FILTER_FIXED_VDIIO] == 0))
     {
-      grub_errno = GRUB_ERR_NONE;
-      grub_dl_load ("vhd");
-      grub_errno = GRUB_ERR_NONE;
+      const char *prefix = grub_env_get ("prefix");
+      if (prefix && *prefix)
+        {
+          grub_errno = GRUB_ERR_NONE;
+          grub_dl_load ("vhd");
+          grub_errno = GRUB_ERR_NONE;
+        }
     }
 #endif
 

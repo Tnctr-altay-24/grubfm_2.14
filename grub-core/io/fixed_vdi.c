@@ -64,6 +64,8 @@ grub_fixed_vdiio_open_filter (grub_file_t io, enum grub_file_type type)
   vdi_preheader_t hdr;
   grub_uint8_t mbr[2];
 
+  if ((type & GRUB_FILE_TYPE_MASK) != GRUB_FILE_TYPE_LOOPBACK)
+    return io;
   if (type & GRUB_FILE_TYPE_NO_DECOMPRESS)
     return io;
   if (io->size < VDI_OFFSET + 0x200)

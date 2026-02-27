@@ -188,6 +188,8 @@ grub_vhdio_open_filter (grub_file_t io, enum grub_file_type type)
   VHDDynamicDiskHeader dynaheader;
   VHDFileControl *vhdfc = NULL;
 
+  if ((type & GRUB_FILE_TYPE_MASK) != GRUB_FILE_TYPE_LOOPBACK)
+    return io;
   if (type & GRUB_FILE_TYPE_NO_DECOMPRESS)
     return io;
   if (io->size < 0x10000)
