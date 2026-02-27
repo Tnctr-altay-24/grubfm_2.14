@@ -238,11 +238,11 @@ grub_cmd_vhd (grub_extcmd_context_t ctxt, int argc, char **args)
 {
   int parser_ready = 0;
 
-  /* Unified virtual-disk entrypoint:
-     keep "vhd" as generic command and load all known parsers. */
+  /* Unified virtual-disk entrypoint. In target builds we can autoload
+     parser modules; in GRUB_UTIL builds keep link-time dependencies minimal. */
+#ifndef GRUB_UTIL
   if (!grub_file_filters[GRUB_FILE_FILTER_FIXED_VDIIO])
     {
-      /* Optional parser. Keep command usable even if module isn't built. */
       grub_errno = GRUB_ERR_NONE;
       grub_dl_load ("fixed_vdi");
       grub_errno = GRUB_ERR_NONE;
@@ -267,9 +267,11 @@ grub_cmd_vhd (grub_extcmd_context_t ctxt, int argc, char **args)
     }
   if (!grub_file_filters[GRUB_FILE_FILTER_VHDIO])
     {
+      grub_errno = GRUB_ERR_NONE;
       grub_dl_load ("vhd");
       grub_errno = GRUB_ERR_NONE;
     }
+#endif
 
   parser_ready =
       (grub_file_filters[GRUB_FILE_FILTER_VHDIO] != 0)
