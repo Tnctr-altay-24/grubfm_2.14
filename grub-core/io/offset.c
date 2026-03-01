@@ -17,6 +17,7 @@
  */
 
 #include <grub/file.h>
+#include <grub/fileview.h>
 #include <grub/dl.h>
 
 GRUB_MOD_LICENSE ("GPLv3+");
@@ -73,9 +74,7 @@ grub_file_offset_open (grub_file_t parent, enum grub_file_type type,
 		       grub_off_t start, grub_off_t size)
 {
   struct grub_offset_file *off_data;
-  grub_file_t off_file, last_off_file;
-  grub_file_filter_id_t filter;
-
+  grub_file_t off_file;
   off_file = grub_zalloc (sizeof (*off_file));
   off_data = grub_zalloc (sizeof (*off_data));
   if (!off_file || !off_data)
@@ -93,19 +92,11 @@ grub_file_offset_open (grub_file_t parent, enum grub_file_type type,
   off_file->fs = &grub_offset_fs;
   off_file->size = size;
 
-  last_off_file = NULL;
-  for (filter = GRUB_FILE_FILTER_COMPRESSION_FIRST;
-       off_file && filter <= GRUB_FILE_FILTER_COMPRESSION_LAST; filter++)
-    if (grub_file_filters[filter])
-      {
-	last_off_file = off_file;
-	off_file = grub_file_filters[filter] (off_file, type);
-      }
+  off_file = grub_fileview_apply_compression (off_file, type);
 
   if (!off_file)
     {
       off_data->parent = NULL;
-      grub_file_close (last_off_file);
       return 0;
     }
   return off_file;

@@ -21,6 +21,7 @@
 #include <grub/mm.h>
 #include <grub/misc.h>
 #include <grub/file.h>
+#include <grub/fileview.h>
 #include <grub/fs.h>
 #include <grub/dl.h>
 
@@ -174,7 +175,7 @@ grub_xzio_open (grub_file_t io, enum grub_file_type type)
   grub_file_t file;
   grub_xzio_t xzio;
 
-  if (type & GRUB_FILE_TYPE_NO_DECOMPRESS)
+  if (!grub_fileview_allow_decompress (type))
     return io;
 
   file = (grub_file_t) grub_zalloc (sizeof (*file));

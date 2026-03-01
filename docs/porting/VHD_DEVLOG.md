@@ -101,3 +101,14 @@ This log tracks implementation status for virtual-disk support behind the unifie
 - 说明：
   - 这一步还没有把 `gzio/xzio/lzopio/zstdio` 从 `grub_file_filter` 链抽离。
   - 但已经先把“raw file backend”和“vdisk parser backend”分成了两块独立代码。
+
+### fileview / decompress 层
+- 新增：
+  - `include/grub/fileview.h`
+  - `grub-core/io/fileview.c`
+- 当前作用：
+  - 统一处理 `NO_DECOMPRESS` 语义
+  - 统一串接 compression filters
+- 现状：
+  - 仍然使用 `grub_file_filter` 作为底层注册机制
+  - 但“压缩流文件视图”已经从 `offset.c` 和各解压实现的分散判断中抽离出来

@@ -272,6 +272,17 @@
 - 作用：
   - 将 `img/iso/raw + 透明解压后的文件视图 + mem/blocklist` 明确为独立后端层。
   - 为后续继续拆出“stream/decompress 层”和“vdisk 容器层”做准备。
+
+6. `fileview` 压缩流层（未提交阶段，当前工作树）
+- 新增：
+  - `include/grub/fileview.h`
+  - `grub-core/io/fileview.c`
+- 调整：
+  - `gzio/xzio/lzopio/zstdio` 的“是否允许解压”判断改由 `grub_fileview_allow_decompress()` 统一处理。
+  - `io/offset.c` 不再自己枚举 compression filter 区间，改由 `grub_fileview_apply_compression()` 统一串接。
+- 作用：
+  - 把“普通文件视图变换”从 `loopback` 和 `vdisk` 侧再拆出一层。
+  - 让压缩流入口判断和 filter 编排不再散落在多个实现中。
   - 把容器探测从通用 file filter 链迁出，减少 `GRUB_FILE_TYPE_*` 标志交织导致的回归面。
 - 文件：`grub-core/Makefile.core.def` + 新增源码目录
 - 已补模块定义：
