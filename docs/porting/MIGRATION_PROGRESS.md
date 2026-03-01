@@ -218,6 +218,47 @@
 - 目的：满足 `hwinfo.sh` 对 CPU/SMBIOS/ACPI 信息链路的直接读取需求。
 
 8. `arch/x64/un.lst` 缺口模块开始回补（进行中）
+
+## G. 2026-03-01 结构化清理
+1. `3dc14067a` `boot: restore memfile support and stabilize BCD patching`
+- 修复背景：
+  - `wimboot` 的 BCD 生成链路在主线 `grub` 上失败，根因不是 BCD 模板，而是 `grub_alive` 中存在、主线中不存在的 `mem:%p:size:%u` 内存文件支持被遗漏。
+  - `grub_patch_bcd()` 使用 `grub_file_open ("mem:%p:size:%u", GRUB_FILE_TYPE_CAT)` 打开内存中的 registry hive；如果没有 memfile 支持，就会误走 blocklist 打开路径。
+- 关键修复：
+  - `grub-core/kern/file.c`：恢复 `mem:%p:size:%u` 伪文件支持。
+  - `grub-core/map/lib/bcd.c`：增加 `bcddbg` 调试、路径长度保护、设备路径调试。
+  - `grub-core/disk/loopback.c`：恢复普通 `loopback` 的透明解压默认行为，避免 `grubfm` 的 `wimboot.xz`/`null.cpio` 等用法回归。
+- 行为结果：
+  - `wimboot` 重新可用。
+  - `ntboot` 的 BCD hive 打开链路恢复正常。
+
+2. `memfile` 独立化（未提交阶段，当前工作树）
+- 新增：
+  - `include/grub/memfile.h`
+  - `grub-core/kern/memfile.c`
+- 调整：
+  - `grub-core/kern/file.c` 不再内联维护 `mem:` 解析逻辑，只保留调用。
+  - `include/grub/port_write.h`、`grub-core/disk/loopback.c` 改为复用公共 `memfile` 判断。
+- 目的：
+  - 把“非原版 GRUB 的 mem 文件能力”从 `file.c` 主路径剥离到单独文件，降低后续合并主线时的冲突范围。
+
+3. `vdisk` 公共层（未提交阶段，当前工作树）
+- 新增：
+  - `include/grub/vdisk.h`
+  - `grub-core/io/vdisk.c`
+- 调整：
+  - `grub-core/disk/loopback.c` 的 `vhd` 命令不再直接枚举 `grub_file_filters[]` 判定解析器是否可用，而是调用公共 `grub_vdisk_parsers_ready()`。
+  - `io/vhdio.c`、`vhdxio.c`、`vmdkio.c`、`qcow2io.c`、`fixed_vdi.c` 的入口过滤条件统一改由 `grub_vdisk_filter_should_open()` 决定。
+- 目的：
+  - 把“ported-only 虚拟磁盘入口判断”从各格式实现中抽离，避免每个解析器重复复制 `LOOPBACK/NO_DECOMPRESS/size` 判断。
+
+4. 当前仍未完成的 `loopback`/`vdisk` 清理
+- 现状：
+  - `loopback`、透明解压、虚拟磁盘容器识别仍共享 `grub_file_filter` 机制。
+  - 当前只是把公共判断和可用性检查抽出，尚未彻底完成“普通 loopback”和“容器 loopback”解耦。
+- 后续建议：
+  - 引入独立的 `vdisk` 分发表和格式 `probe/open/read` 抽象。
+  - 把容器探测从通用 file filter 链迁出，减少 `GRUB_FILE_TYPE_*` 标志交织导致的回归面。
 - 文件：`grub-core/Makefile.core.def` + 新增源码目录
 - 已补模块定义：
   - `commandline`、`crc`、`dd`、`version`

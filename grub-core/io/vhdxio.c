@@ -9,6 +9,7 @@
 #include <grub/file.h>
 #include <grub/mm.h>
 #include <grub/lib/crc.h>
+#include <grub/vdisk.h>
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
@@ -454,11 +455,9 @@ grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type)
   grub_uint8_t sig[8];
   grub_uint32_t param_bits = 0;
 
-  if ((type & GRUB_FILE_TYPE_MASK) != GRUB_FILE_TYPE_LOOPBACK)
-    return io;
-  if (type & GRUB_FILE_TYPE_NO_DECOMPRESS)
-    return io;
-  if (io->size < (grub_off_t) (VHDX_REGION_TBL2_OFF + VHDX_HEADER_BLOCK_SIZE))
+  if (!grub_vdisk_filter_should_open (io, type,
+                                      (grub_off_t) (VHDX_REGION_TBL2_OFF
+                                                    + VHDX_HEADER_BLOCK_SIZE)))
     return io;
 
   if (!read_exact_at (io, VHDX_FILE_ID_OFF, sig, sizeof (sig)))

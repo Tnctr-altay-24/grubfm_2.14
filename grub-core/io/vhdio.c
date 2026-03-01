@@ -37,6 +37,7 @@
 #include <grub/file.h>
 #include <grub/mm.h>
 #include <grub/types.h>
+#include <grub/vdisk.h>
 
 #pragma GCC diagnostic ignored "-Wcast-align"
 
@@ -188,11 +189,7 @@ grub_vhdio_open_filter (grub_file_t io, enum grub_file_type type)
   VHDDynamicDiskHeader dynaheader;
   VHDFileControl *vhdfc = NULL;
 
-  if ((type & GRUB_FILE_TYPE_MASK) != GRUB_FILE_TYPE_LOOPBACK)
-    return io;
-  if (type & GRUB_FILE_TYPE_NO_DECOMPRESS)
-    return io;
-  if (io->size < 0x10000)
+  if (!grub_vdisk_filter_should_open (io, type, 0x10000))
     return io;
 
   /* test header */

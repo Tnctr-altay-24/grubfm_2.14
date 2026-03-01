@@ -9,6 +9,7 @@
 #include <grub/file.h>
 #include <grub/mm.h>
 #include <grub/types.h>
+#include <grub/vdisk.h>
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
@@ -135,11 +136,7 @@ grub_qcow2io_open_filter (grub_file_t io, enum grub_file_type type)
   grub_uint64_t i;
   grub_size_t l1_bytes;
 
-  if ((type & GRUB_FILE_TYPE_MASK) != GRUB_FILE_TYPE_LOOPBACK)
-    return io;
-  if (type & GRUB_FILE_TYPE_NO_DECOMPRESS)
-    return io;
-  if (io->size < (grub_off_t) sizeof (hraw))
+  if (!grub_vdisk_filter_should_open (io, type, (grub_off_t) sizeof (hraw)))
     return io;
 
   if (!read_exact_at (io, 0, hraw, sizeof (hraw)))

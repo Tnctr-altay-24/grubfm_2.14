@@ -24,8 +24,10 @@
 #include <grub/mm.h>
 #include <grub/extcmd.h>
 #include <grub/i18n.h>
+#include <grub/memfile.h>
 #include <grub/safemath.h>
 #include <grub/port_write.h>
+#include <grub/vdisk.h>
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
@@ -55,8 +57,8 @@ static const struct grub_arg_option options[] =
 static int
 loop_is_mem_name (const char *name)
 {
-  return name && (grub_strncmp (name, "mem:", 4) == 0
-                  || grub_strncmp (name, "(mem)", 5) == 0);
+  return grub_memfile_is_name (name)
+      || (name && grub_strncmp (name, "(mem)", 5) == 0);
 }
 
 static grub_file_t
@@ -245,12 +247,7 @@ grub_cmd_vhd (grub_extcmd_context_t ctxt, int argc, char **args)
   struct grub_arg_list *state = ctxt->state;
   int parser_ready = 0;
 
-  parser_ready =
-      (grub_file_filters[GRUB_FILE_FILTER_VHDIO] != 0)
-   || (grub_file_filters[GRUB_FILE_FILTER_VHDXIO] != 0)
-   || (grub_file_filters[GRUB_FILE_FILTER_QCOW2IO] != 0)
-   || (grub_file_filters[GRUB_FILE_FILTER_VMDKIO] != 0)
-   || (grub_file_filters[GRUB_FILE_FILTER_FIXED_VDIIO] != 0);
+  parser_ready = grub_vdisk_parsers_ready ();
 
   if (!parser_ready)
     return grub_error (GRUB_ERR_UNKNOWN_COMMAND,

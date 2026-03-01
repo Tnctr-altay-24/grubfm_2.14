@@ -143,6 +143,7 @@ kernel = {
   common = kern/env.c;
   common = kern/err.c;
   common = kern/file.c;
+  common = kern/memfile.c;
   common = kern/fs.c;
   common = kern/list.c;
   common = kern/main.c;
@@ -1194,6 +1195,7 @@ module = {
 
 module = {
   name = vhd;
+  common = io/vdisk.c;
   common = io/vhdio.c;
   common = io/fixed_vdi.c;
   common = io/vhdxio.c;

@@ -5,6 +5,7 @@
 #include <grub/disk.h>
 #include <grub/file.h>
 #include <grub/mm.h>
+#include <grub/memfile.h>
 #include <grub/misc.h>
 #include <grub/partition.h>
 
@@ -25,8 +26,8 @@ struct grub_port_blocklist_ctx
 static int
 grub_port_is_mem_name (const char *name)
 {
-  return name && (grub_strncmp (name, "mem:", 4) == 0
-                  || grub_strncmp (name, "(mem)", 5) == 0);
+  return grub_memfile_is_name (name)
+      || (name && grub_strncmp (name, "(mem)", 5) == 0);
 }
 
 static grub_ssize_t
