@@ -268,12 +268,33 @@ bcd_patch_dp (struct bcd_patch_data *cmd)
   }
   memset (&cmd->dp, 0, sizeof (struct bcd_dp));
   p = cmd->file->device->disk->partition;
-  if (!p || !p->partmap)
-    return grub_error (GRUB_ERR_BAD_DEVICE, "partition info unavailable");
 
   disk = grub_disk_open (cmd->file->device->disk->name);
   if (!disk)
     return grub_errno;
+
+  if (!p || !p->partmap)
+  {
+    grub_uint32_t nt_disk_sig = 0;
+
+    part_start = 0;
+    cmd->dp.partmap = 0x01;
+    grub_memcpy (cmd->dp.partid, &part_start, 8);
+    if (grub_disk_read (disk, 0, 0x1b8, sizeof (nt_disk_sig), &nt_disk_sig) != 0)
+      {
+        grub_disk_close (disk);
+        return grub_errno;
+      }
+    grub_memcpy (cmd->dp.diskid, &nt_disk_sig, 4);
+    grub_dprintf ("bcddbg",
+                  "bcd: whole-disk dp disk=%s sig=%08x part_start=%llu path=%s\n",
+                  cmd->file->device->disk->name, (unsigned) nt_disk_sig,
+                  (unsigned long long) part_start, cmd->path ? cmd->path : "(null)");
+    grub_disk_close (disk);
+    bcd_replace_hex (BCD_DP_MAGIC, strlen (BCD_DP_MAGIC),
+                     &cmd->dp, sizeof (struct bcd_dp), 0);
+    return GRUB_ERR_NONE;
+  }
 
   if (strcmp (p->partmap->name, "gpt") == 0)
   {

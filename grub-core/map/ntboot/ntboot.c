@@ -96,7 +96,7 @@ enum options_ntboot
 
 static int check_disk (grub_disk_t disk)
 {
-  if (!disk || !disk->partition || !disk->dev)
+  if (!disk || !disk->dev)
     return 0;
   if (disk->dev->id == GRUB_DISK_DEVICE_EFIDISK_ID && disk->name[0] == 'h')
     return 1;
@@ -153,6 +153,9 @@ grub_cmd_ntboot (grub_extcmd_context_t ctxt,
                 "this command is available only for disk devices");
     goto fail;
   }
+  if (!file->device->disk->partition)
+    grub_dprintf ("ntbootdbg",
+                  "ntboot: source is whole-disk filesystem without partition metadata\n");
   if (argv[0][0] == '(')
     path = grub_strchr (argv[0], '/');
   if (!path)

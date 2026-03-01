@@ -25,6 +25,8 @@
 #include <grub/i18n.h>
 #include <grub/color.h>
 #include <grub/env.h>
+#include <grub/command.h>
+#include <grub/parser.h>
 
 static const char *align_options[] =
 {
@@ -50,10 +52,12 @@ struct grub_gui_label
   int visible;
   char *text;
   char *template;
+  char *env;
   grub_font_t font;
   grub_video_rgba_color_t color;
   int value;
   enum align_mode align;
+  void (*refresh_text) (void *vself, grub_gfxmenu_view_t view);
 };
 
 typedef struct grub_gui_label *grub_gui_label_t;
@@ -65,6 +69,7 @@ label_destroy (void *vself)
   grub_gfxmenu_timeout_unregister ((grub_gui_component_t) self);
   grub_free (self->text);
   grub_free (self->template);
+  grub_free (self->env);
   grub_free (self);
 }
 
@@ -147,10 +152,48 @@ label_get_bounds (void *vself, grub_video_rect_t *bounds)
 }
 
 static void
+label_refresh_default (void *vself __attribute__ ((unused)),
+                       grub_gfxmenu_view_t view __attribute__ ((unused)))
+{
+}
+
+static void
+label_refresh_var (void *vself,
+                   grub_gfxmenu_view_t view __attribute__ ((unused)))
+{
+  int n;
+  char **args = NULL;
+  grub_gui_label_t self = vself;
+
+  grub_free (self->text);
+  if (self->template && self->template[0])
+    {
+      if ((!grub_parser_split_cmdline (self->template, 0, 0, &n, &args))
+          && (n >= 0))
+        {
+          grub_command_t cmd;
+          cmd = grub_command_find (args[0]);
+          if (cmd)
+            (cmd->func) (cmd, n - 1, &args[1]);
+          grub_free (args[0]);
+          grub_free (args);
+        }
+    }
+
+  if (self->env)
+    self->text = grub_strdup (grub_env_get (self->env));
+  else
+    self->text = grub_strdup ("");
+}
+
+static void
 label_get_minimal_size (void *vself, unsigned *width, unsigned *height)
 {
   grub_gui_label_t self = vself;
-  *width = grub_font_get_string_width (self->font, self->text);
+  if (self->refresh_text == label_refresh_default)
+    *width = grub_font_get_string_width (self->font, self->text);
+  else
+    *width = 65535;
   *height = (grub_font_get_ascent (self->font)
              + grub_font_get_descent (self->font));
 }
@@ -174,6 +217,7 @@ label_set_property (void *vself, const char *name, const char *value)
   grub_gui_label_t self = vself;
   if (grub_strcmp (name, "text") == 0)
     {
+      self->refresh_text = label_refresh_default;
       grub_free (self->text);
       grub_free (self->template);
       if (! value)
@@ -193,10 +237,13 @@ label_set_property (void *vself, const char *name, const char *value)
 	       "or `c' for a command-line.");
 	   else if (grub_strcmp (value, "@KEYMAP_SHORT@") == 0)
 	    value = _("enter: boot, `e': options, `c': cmd-line");
+           else if (grub_strcmp (value, "@KEYMAP_SCROLL_ENTRY@") == 0)
+            value = _("ctrl+l: scroll entry left, ctrl+r: scroll entry right");
            else if (value[0] == '@' && value[1] == '@' && value[2] != '\0')
             {
-              const char *env = grub_env_get (&value[2]);
-              value = env ? env : "";
+              value = grub_env_get (&value[2]);
+              if (!value)
+                value = "";
             }
 	   /* FIXME: Add more templates here if needed.  */
 
@@ -206,6 +253,25 @@ label_set_property (void *vself, const char *name, const char *value)
 	  self->template = grub_strdup (value);
 	  self->text = grub_xasprintf (value, self->value);
 	}
+    }
+  else if (grub_strcmp (name, "translate") == 0)
+    {
+      self->refresh_text = label_refresh_default;
+      grub_free (self->text);
+      self->text = grub_strdup (value ? grub_gettext (value) : "");
+    }
+  else if (grub_strcmp (name, "var") == 0)
+    {
+      self->refresh_text = label_refresh_var;
+      grub_free (self->env);
+      grub_free (self->text);
+      self->text = grub_strdup ("");
+      self->env = grub_strdup (value);
+    }
+  else if (grub_strcmp (name, "hook") == 0)
+    {
+      grub_free (self->template);
+      self->template = grub_strdup (value ? value : "");
     }
   else if (grub_strcmp (name, "font") == 0)
     {
@@ -233,16 +299,19 @@ label_set_property (void *vself, const char *name, const char *value)
     }
   else if (grub_strcmp (name, "id") == 0)
     {
+      self->refresh_text = label_refresh_default;
       grub_gfxmenu_timeout_unregister ((grub_gui_component_t) self);
       grub_free (self->id);
-      if (value)
-        self->id = grub_strdup (value);
-      else
+      if (!value)
         self->id = 0;
-      if (self->id && grub_strcmp (self->id, GRUB_GFXMENU_TIMEOUT_COMPONENT_ID)
-	  == 0)
-	grub_gfxmenu_timeout_register ((grub_gui_component_t) self,
-				       label_set_state);
+      else if (grub_strcmp (value, GRUB_GFXMENU_TIMEOUT_COMPONENT_ID) == 0)
+        {
+          self->id = grub_strdup (value);
+          grub_gfxmenu_timeout_register ((grub_gui_component_t) self,
+                                         label_set_state);
+        }
+      else
+        self->id = grub_strdup (value);
     }
   return GRUB_ERR_NONE;
 }
@@ -279,5 +348,6 @@ grub_gui_label_new (void)
   label->color.blue = 0;
   label->color.alpha = 255;
   label->align = align_left;
+  label->refresh_text = label_refresh_default;
   return (grub_gui_component_t) label;
 }
