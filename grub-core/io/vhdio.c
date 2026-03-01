@@ -354,18 +354,23 @@ static struct grub_fs grub_vhdio_fs = {
 
 GRUB_MOD_INIT(vhd)
 {
-  grub_file_filter_register (GRUB_FILE_FILTER_QCOW2IO, grub_qcow2io_open_filter);
-  grub_file_filter_register (GRUB_FILE_FILTER_VHDXIO, grub_vhdxio_open_filter);
-  grub_file_filter_register (GRUB_FILE_FILTER_VMDKIO, grub_vmdkio_open_filter);
-  grub_file_filter_register (GRUB_FILE_FILTER_FIXED_VDIIO, grub_fixed_vdiio_open_filter);
-  grub_file_filter_register (GRUB_FILE_FILTER_VHDIO, grub_vhdio_open_filter);
+  grub_vdisk_register_parser (GRUB_FILE_FILTER_QCOW2IO,
+                              grub_qcow2io_open_filter);
+  grub_vdisk_register_parser (GRUB_FILE_FILTER_VHDXIO,
+                              grub_vhdxio_open_filter);
+  grub_vdisk_register_parser (GRUB_FILE_FILTER_VMDKIO,
+                              grub_vmdkio_open_filter);
+  grub_vdisk_register_parser (GRUB_FILE_FILTER_FIXED_VDIIO,
+                              grub_fixed_vdiio_open_filter);
+  grub_vdisk_register_parser (GRUB_FILE_FILTER_VHDIO,
+                              grub_vhdio_open_filter);
 }
 
 GRUB_MOD_FINI(vhd)
 {
-  grub_file_filter_unregister (GRUB_FILE_FILTER_QCOW2IO);
-  grub_file_filter_unregister (GRUB_FILE_FILTER_VHDXIO);
-  grub_file_filter_unregister (GRUB_FILE_FILTER_VMDKIO);
-  grub_file_filter_unregister (GRUB_FILE_FILTER_FIXED_VDIIO);
-  grub_file_filter_unregister (GRUB_FILE_FILTER_VHDIO);
+  grub_vdisk_unregister_parser (GRUB_FILE_FILTER_QCOW2IO);
+  grub_vdisk_unregister_parser (GRUB_FILE_FILTER_VHDXIO);
+  grub_vdisk_unregister_parser (GRUB_FILE_FILTER_VMDKIO);
+  grub_vdisk_unregister_parser (GRUB_FILE_FILTER_FIXED_VDIIO);
+  grub_vdisk_unregister_parser (GRUB_FILE_FILTER_VHDIO);
 }

@@ -125,6 +125,40 @@ fail:
   return ret;
 }
 
+static grub_err_t
+create_loopback_from_file (const char *devname, grub_file_t file)
+{
+  struct grub_loopback *newdev;
+  grub_err_t ret;
+
+  for (newdev = loopback_list; newdev; newdev = newdev->next)
+    if (grub_strcmp (newdev->devname, devname) == 0)
+      return grub_error (GRUB_ERR_BAD_ARGUMENT, "device name already exists");
+
+  newdev = grub_malloc (sizeof (struct grub_loopback));
+  if (!newdev)
+    goto fail;
+
+  newdev->devname = grub_strdup (devname);
+  if (!newdev->devname)
+    {
+      grub_free (newdev);
+      goto fail;
+    }
+
+  newdev->file = file;
+  newdev->id = last_id++;
+  newdev->refcnt = 0;
+  newdev->next = loopback_list;
+  loopback_list = newdev;
+  return GRUB_ERR_NONE;
+
+fail:
+  ret = grub_errno;
+  grub_loopback_file_close (file);
+  return ret;
+}
+
 /* The command to add and remove loopback devices.  */
 static grub_err_t
 grub_cmd_loopback (grub_extcmd_context_t ctxt, int argc, char **args)
@@ -169,10 +203,30 @@ grub_cmd_vhd (grub_extcmd_context_t ctxt, int argc, char **args)
   if (argc < 2)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("filename expected"));
 
-  /* Virtual-disk parsers are implemented as file filters and therefore must
-     see the loopback type without the NO_DECOMPRESS short-circuit.  */
-  return create_loopback (args[0], args[1], state[1].set, state[2].set,
-                          GRUB_FILE_TYPE_LOOPBACK);
+  {
+    grub_file_t file;
+    grub_file_t parsed;
+
+    file = grub_loopback_file_open (args[1], state[1].set, state[2].set,
+                                    GRUB_FILE_TYPE_LOOPBACK);
+    if (!file)
+      return grub_errno;
+
+    parsed = grub_vdisk_apply_parsers (file, GRUB_FILE_TYPE_LOOPBACK);
+    if (!parsed)
+      {
+        grub_loopback_file_close (file);
+        return grub_errno;
+      }
+    if (parsed == file)
+      {
+        grub_loopback_file_close (file);
+        return grub_error (GRUB_ERR_BAD_FILE_TYPE,
+                           "unsupported virtual disk format");
+      }
+
+    return create_loopback_from_file (args[0], parsed);
+  }
 }
 
 

@@ -18,7 +18,18 @@
  */
 
 #include <grub/file.h>
+#include <grub/misc.h>
 #include <grub/vdisk.h>
+
+static grub_vdisk_parser_t grub_vdisk_parsers[GRUB_FILE_FILTER_MAX];
+static const grub_file_filter_id_t grub_vdisk_parser_order[] =
+  {
+    GRUB_FILE_FILTER_QCOW2IO,
+    GRUB_FILE_FILTER_VHDXIO,
+    GRUB_FILE_FILTER_VMDKIO,
+    GRUB_FILE_FILTER_FIXED_VDIIO,
+    GRUB_FILE_FILTER_VHDIO
+  };
 
 int
 grub_vdisk_filter_should_open (grub_file_t io, enum grub_file_type type,
@@ -33,4 +44,58 @@ grub_vdisk_filter_should_open (grub_file_t io, enum grub_file_type type,
   if (io->size < min_size)
     return 0;
   return 1;
+}
+
+void
+grub_vdisk_register_parser (grub_file_filter_id_t id, grub_vdisk_parser_t parser)
+{
+  if (id <= GRUB_FILE_FILTER_ZSTDIO || id >= GRUB_FILE_FILTER_MAX)
+    return;
+  grub_vdisk_parsers[id] = parser;
+}
+
+void
+grub_vdisk_unregister_parser (grub_file_filter_id_t id)
+{
+  if (id <= GRUB_FILE_FILTER_ZSTDIO || id >= GRUB_FILE_FILTER_MAX)
+    return;
+  grub_vdisk_parsers[id] = 0;
+}
+
+int
+grub_vdisk_parsers_ready (void)
+{
+  grub_size_t i;
+
+  for (i = 0; i < ARRAY_SIZE (grub_vdisk_parser_order); i++)
+    if (grub_vdisk_parsers[grub_vdisk_parser_order[i]])
+      return 1;
+  return 0;
+}
+
+grub_file_t
+grub_vdisk_apply_parsers (grub_file_t io, enum grub_file_type type)
+{
+  grub_size_t i;
+  grub_file_t next;
+
+  if (!io)
+    return 0;
+
+  for (i = 0; i < ARRAY_SIZE (grub_vdisk_parser_order); i++)
+    {
+      grub_vdisk_parser_t parser;
+
+      parser = grub_vdisk_parsers[grub_vdisk_parser_order[i]];
+      if (!parser)
+        continue;
+
+      next = parser (io, type);
+      if (!next)
+        return 0;
+      if (next != io)
+        return next;
+    }
+
+  return io;
 }

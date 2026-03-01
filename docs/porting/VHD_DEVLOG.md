@@ -112,3 +112,14 @@ This log tracks implementation status for virtual-disk support behind the unifie
 - 现状：
   - 仍然使用 `grub_file_filter` 作为底层注册机制
   - 但“压缩流文件视图”已经从 `offset.c` 和各解压实现的分散判断中抽离出来
+
+### vdisk parser 注册表
+- 调整：
+  - `GRUB_FILE_FILTER_COMPRESSION_LAST` 现在只到 `ZSTDIO`
+  - `VHD/QCOW2/VMDK/VDI/VHDX` 不再作为“压缩 filter”参与 `fileview` 串接
+  - `vhd.mod` 改为显式向 `vdisk` 注册 parser
+  - `vhd` 命令改为显式 apply parser，而不是依赖 generic file filter 顺序
+- 当前结构：
+  - `loopback_file` 负责 raw backing file
+  - `fileview` 负责压缩流视图
+  - `vdisk` 负责容器 parser 注册与分发

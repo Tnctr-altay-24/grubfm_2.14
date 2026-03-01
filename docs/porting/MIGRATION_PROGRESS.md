@@ -259,7 +259,7 @@
 - 后续建议：
   - 引入独立的 `vdisk` 分发表和格式 `probe/open/read` 抽象。
 
-5. `loopback raw backend` 第一阶段拆分（未提交阶段，当前工作树）
+5. `loopback raw backend` 第一阶段拆分
 - 新增：
   - `include/grub/loopback_file.h`
   - `grub-core/disk/loopback_file.c`
@@ -273,7 +273,7 @@
   - 将 `img/iso/raw + 透明解压后的文件视图 + mem/blocklist` 明确为独立后端层。
   - 为后续继续拆出“stream/decompress 层”和“vdisk 容器层”做准备。
 
-6. `fileview` 压缩流层（未提交阶段，当前工作树）
+6. `fileview` 压缩流层
 - 新增：
   - `include/grub/fileview.h`
   - `grub-core/io/fileview.c`
@@ -283,7 +283,22 @@
 - 作用：
   - 把“普通文件视图变换”从 `loopback` 和 `vdisk` 侧再拆出一层。
   - 让压缩流入口判断和 filter 编排不再散落在多个实现中。
-  - 把容器探测从通用 file filter 链迁出，减少 `GRUB_FILE_TYPE_*` 标志交织导致的回归面。
+
+7. `vdisk` 显式 parser 注册表
+- 调整：
+  - `include/grub/file.h` 中 `GRUB_FILE_FILTER_COMPRESSION_LAST` 收回到 `GRUB_FILE_FILTER_ZSTDIO`，不再把 `vhd/qcow2/vmdk/vdi/vhdx` 这组容器 parser 误当作“压缩 filter”。
+  - `include/grub/vdisk.h` + `grub-core/io/vdisk.c` 增加显式注册表：
+    - `grub_vdisk_register_parser()`
+    - `grub_vdisk_unregister_parser()`
+    - `grub_vdisk_parsers_ready()`
+    - `grub_vdisk_apply_parsers()`
+  - `grub-core/io/vhdio.c` 不再向通用 `grub_file_filter` 链注册 `VHD/QCOW2/VMDK/VDI/VHDX`，改为向 `vdisk` 注册表显式注册。
+  - `grub-core/disk/loopback.c` 中 `vhd` 命令改为：
+    - 先走 `loopback_file_open()` 打开 raw backing file
+    - 再显式调用 `grub_vdisk_apply_parsers()`
+- 作用：
+  - `loopback raw` 和 `vhd container` 入口不再通过 generic file filter 链隐式耦合。
+  - `offsetio/fileview` 不会再把 vdisk parser 当作压缩层串进去。
 - 文件：`grub-core/Makefile.core.def` + 新增源码目录
 - 已补模块定义：
   - `commandline`、`crc`、`dd`、`version`
