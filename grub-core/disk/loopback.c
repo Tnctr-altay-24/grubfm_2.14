@@ -173,15 +173,55 @@ delete_loopback (const char *name)
   return 0;
 }
 
+static grub_err_t
+create_loopback (const char *devname, const char *filename,
+                 int mem, int bl, enum grub_file_type type)
+{
+  grub_file_t file;
+  struct grub_loopback *newdev;
+  grub_err_t ret;
+
+  /* Check that a device with requested name does not already exist. */
+  for (newdev = loopback_list; newdev; newdev = newdev->next)
+    if (grub_strcmp (newdev->devname, devname) == 0)
+      return grub_error (GRUB_ERR_BAD_ARGUMENT, "device name already exists");
+
+  file = loop_file_open (filename, mem, bl, type);
+  if (! file)
+    return grub_errno;
+
+  newdev = grub_malloc (sizeof (struct grub_loopback));
+  if (! newdev)
+    goto fail;
+
+  newdev->devname = grub_strdup (devname);
+  if (! newdev->devname)
+    {
+      grub_free (newdev);
+      goto fail;
+    }
+
+  newdev->file = file;
+  newdev->id = last_id++;
+  newdev->refcnt = 0;
+
+  newdev->next = loopback_list;
+  loopback_list = newdev;
+
+  return 0;
+
+fail:
+  ret = grub_errno;
+  loop_file_close (file);
+  return ret;
+}
+
 /* The command to add and remove loopback devices.  */
 static grub_err_t
 grub_cmd_loopback (grub_extcmd_context_t ctxt, int argc, char **args)
 {
   struct grub_arg_list *state = ctxt->state;
-  grub_file_t file;
   enum grub_file_type type = GRUB_FILE_TYPE_LOOPBACK;
-  struct grub_loopback *newdev;
-  grub_err_t ret;
 
   if (argc < 1)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, "device name required");
@@ -196,46 +236,13 @@ grub_cmd_loopback (grub_extcmd_context_t ctxt, int argc, char **args)
   if (argc < 2)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("filename expected"));
 
-  /* Check that a device with requested name does not already exist. */
-  for (newdev = loopback_list; newdev; newdev = newdev->next)
-    if (grub_strcmp (newdev->devname, args[0]) == 0)
-      return grub_error (GRUB_ERR_BAD_ARGUMENT, "device name already exists");
-
-  file = loop_file_open (args[1], state[1].set, state[2].set, type);
-  if (! file)
-    return grub_errno;
-
-  /* Unable to replace it, make a new entry.  */
-  newdev = grub_malloc (sizeof (struct grub_loopback));
-  if (! newdev)
-    goto fail;
-
-  newdev->devname = grub_strdup (args[0]);
-  if (! newdev->devname)
-    {
-      grub_free (newdev);
-      goto fail;
-    }
-
-  newdev->file = file;
-  newdev->id = last_id++;
-  newdev->refcnt = 0;
-
-  /* Add the new entry to the list.  */
-  newdev->next = loopback_list;
-  loopback_list = newdev;
-
-  return 0;
-
-fail:
-  ret = grub_errno;
-  loop_file_close (file);
-  return ret;
+  return create_loopback (args[0], args[1], state[1].set, state[2].set, type);
 }
 
 static grub_err_t
 grub_cmd_vhd (grub_extcmd_context_t ctxt, int argc, char **args)
 {
+  struct grub_arg_list *state = ctxt->state;
   int parser_ready = 0;
 
   parser_ready =
@@ -249,7 +256,19 @@ grub_cmd_vhd (grub_extcmd_context_t ctxt, int argc, char **args)
     return grub_error (GRUB_ERR_UNKNOWN_COMMAND,
                        N_("no virtual-disk parser module is available; run `insmod vhd'"));
 
-  return grub_cmd_loopback (ctxt, argc, args);
+  if (argc < 1)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, "device name required");
+
+  if (state[0].set)
+    return delete_loopback (args[0]);
+
+  if (argc < 2)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("filename expected"));
+
+  /* Virtual-disk parsers are implemented as file filters and therefore must
+     see the loopback type without the NO_DECOMPRESS short-circuit.  */
+  return create_loopback (args[0], args[1], state[1].set, state[2].set,
+                          GRUB_FILE_TYPE_LOOPBACK);
 }
 
 
