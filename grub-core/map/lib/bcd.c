@@ -93,6 +93,11 @@ load_bcd (enum bcd_type type)
       break;
   }
   grub_xz_decompress (bcd, bcd_len, grub_bcd_data, BCD_DECOMPRESS_LEN);
+  grub_dprintf ("bcddbg",
+                "bcd: load type=%d head=%02x %02x %02x %02x %02x %02x %02x %02x\n",
+                type,
+                grub_bcd_data[0], grub_bcd_data[1], grub_bcd_data[2], grub_bcd_data[3],
+                grub_bcd_data[4], grub_bcd_data[5], grub_bcd_data[6], grub_bcd_data[7]);
 }
 
 #if 0
@@ -105,6 +110,76 @@ bcd_print_hex (const void *data, grub_size_t len)
     grub_printf ("%02x ", p[i]);
 }
 #endif
+
+static const char *
+bcd_key_name (const wchar_t *keyname)
+{
+  if (wcscasecmp (keyname, BCDOPT_WINLOAD) == 0)
+    return "WINLOAD";
+  if (wcscasecmp (keyname, BCDOPT_CMDLINE) == 0)
+    return "CMDLINE";
+  if (wcscasecmp (keyname, BCDOPT_SYSROOT) == 0)
+    return "SYSROOT";
+  if (wcscasecmp (keyname, BCDOPT_REPATH) == 0)
+    return "REPATH";
+  if (wcscasecmp (keyname, BCDOPT_REHIBR) == 0)
+    return "REHIBR";
+  if (wcscasecmp (keyname, BCDOPT_TIMEOUT) == 0)
+    return "TIMEOUT";
+  return "(other)";
+}
+
+static grub_size_t
+bcd_find_utf16_ascii (const char *needle)
+{
+  grub_size_t nlen = grub_strlen (needle);
+  grub_size_t off;
+  grub_size_t limit;
+
+  if (!needle || !nlen)
+    return (grub_size_t) -1;
+
+  limit = BCD_DECOMPRESS_LEN;
+  for (off = 0; off + (nlen * 2) <= limit; off++)
+    {
+      grub_size_t i;
+      for (i = 0; i < nlen; i++)
+        {
+          if (grub_bcd_data[off + i * 2] != (grub_uint8_t) needle[i]
+              || grub_bcd_data[off + i * 2 + 1] != 0)
+            break;
+        }
+      if (i == nlen)
+        return off;
+    }
+  return (grub_size_t) -1;
+}
+
+static void
+bcd_debug_dump_matches (void)
+{
+  struct
+  {
+    const char *label;
+    const char *needle;
+  } probes[] =
+  {
+    { "boot.wim", "\\boot.wim" },
+    { "sysroot", "\\Windows" },
+    { "winload-short", "\\Windows\\System32\\winload.efi" },
+    { "winload-boot", "\\Windows\\System32\\boot\\winload.efi" },
+  };
+  grub_size_t i;
+
+  for (i = 0; i < ARRAY_SIZE (probes); i++)
+    {
+      grub_size_t off = bcd_find_utf16_ascii (probes[i].needle);
+      grub_dprintf ("bcddbg", "bcd: probe %-13s off=%s%lu\n",
+                    probes[i].label,
+                    (off == (grub_size_t) -1) ? "missing:" : "",
+                    (unsigned long) ((off == (grub_size_t) -1) ? 0 : off));
+    }
+}
 
 static void
 bcd_replace_hex (const void *search, uint32_t search_len,
@@ -132,13 +207,14 @@ bcd_replace_hex (const void *search, uint32_t search_len,
   }
 }
 
-static void
+static grub_err_t
 bcd_patch_path (const char *path)
 {
   const char *search = "\\PATH_SIGN";
   char path8[256], *p;
   wchar_t path16[256];
   grub_size_t len;
+  grub_size_t max_len = 2 * (strlen (search) + 1);
   if (path[0] != '/')
     grub_snprintf (path8, 256, "/%s", path);
   else
@@ -156,7 +232,15 @@ bcd_patch_path (const char *path)
   grub_memset (path16, 0, sizeof (path16));
   grub_utf8_to_utf16 (path16, len, (grub_uint8_t *)path8, -1, NULL);
 
+  grub_dprintf ("bcddbg", "bcd: patch path src=%s dos=%s utf16_len=%lu max=%lu\n",
+                path ? path : "(null)", path8,
+                (unsigned long) len, (unsigned long) max_len);
+  if (len > max_len)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT,
+                       "BCD path too long for template placeholder: %s", path8);
+
   bcd_replace_hex (search, strlen (search), path16, len, 0);
+  return GRUB_ERR_NONE;
 }
 
 static grub_err_t
@@ -176,6 +260,8 @@ bcd_patch_dp (struct bcd_patch_data *cmd)
     memcpy (cmd->dp.partid, &part_start, 8);
     cmd->dp.partmap = 0x01;
     memcpy (cmd->dp.diskid, &signature, 4);
+    grub_dprintf ("bcddbg", "bcd: raw dp diskid=%08x part_start=%llu\n",
+                  (unsigned) signature, (unsigned long long) part_start);
     bcd_replace_hex (BCD_DP_MAGIC, strlen (BCD_DP_MAGIC),
                    &cmd->dp, sizeof (struct bcd_dp), 0);
     return GRUB_ERR_NONE;
@@ -203,6 +289,10 @@ bcd_patch_dp (struct bcd_patch_data *cmd)
       }
     grub_memcpy (cmd->dp.diskid, &gpt_hdr.guid, 16);
     grub_memcpy (cmd->dp.partid, &entry.guid, 16);
+    grub_dprintf ("bcddbg",
+                  "bcd: gpt dp disk=%s table_lba=%llu entry_ofs=%d\n",
+                  cmd->file->device->disk->name,
+                  (unsigned long long) p->offset, p->index);
   }
   else
   {
@@ -218,6 +308,10 @@ bcd_patch_dp (struct bcd_patch_data *cmd)
         return grub_errno;
       }
     grub_memcpy (cmd->dp.diskid, &nt_disk_sig, 4);
+    grub_dprintf ("bcddbg",
+                  "bcd: msdos dp disk=%s sig=%08x part_start=%llu path=%s\n",
+                  cmd->file->device->disk->name, (unsigned) nt_disk_sig,
+                  (unsigned long long) part_start, cmd->path ? cmd->path : "(null)");
   }
   grub_disk_close (disk);
   bcd_replace_hex (BCD_DP_MAGIC, strlen (BCD_DP_MAGIC),
@@ -272,6 +366,7 @@ bcd_parse_str (grub_reg_hive_t *hive, const wchar_t *keyname,
   HKEY root, objects, osloader, elements, key;
   grub_uint16_t *data = NULL;
   grub_uint32_t data_len = 0, type;
+  grub_size_t utf16_len;
   hive->find_root (hive, &root);
   hive->find_key (hive, root, BCD_REG_ROOT, &objects);
   if (resume)
@@ -282,7 +377,20 @@ bcd_parse_str (grub_reg_hive_t *hive, const wchar_t *keyname,
   hive->find_key (hive, elements, keyname, &key);
   hive->query_value_no_copy (hive, key, BCD_REG_HVAL,
                              (void **)&data, &data_len, &type);
+  utf16_len = 2 * (grub_strlen (s) + 1);
+  grub_dprintf ("bcddbg",
+                "bcd: parse_str key=%s resume=%u src=%s utf16_len=%lu data_len=%u type=%u\n",
+                bcd_key_name (keyname), resume, s ? s : "(null)",
+                (unsigned long) utf16_len, data_len, type);
   grub_memset (data, 0, data_len);
+  if (utf16_len > data_len)
+    {
+      grub_dprintf ("bcddbg",
+                    "bcd: truncate key=%s utf16_len=%lu to data_len=%u\n",
+                    bcd_key_name (keyname), (unsigned long) utf16_len, data_len);
+      grub_utf8_to_utf16 (data, data_len, (grub_uint8_t *)s, -1, NULL);
+      return;
+    }
   grub_utf8_to_utf16 (data, data_len, (grub_uint8_t *)s, -1, NULL);
 }
 
@@ -297,11 +405,16 @@ grub_patch_bcd (struct bcd_patch_data *cmd)
 
   load_bcd (cmd->type);
 
-  if (cmd->type != BOOT_WIN)
-    bcd_patch_path (cmd->path);
+  if (cmd->type != BOOT_WIN && bcd_patch_path (cmd->path))
+    return grub_errno;
 
   if (bcd_patch_dp (cmd))
     return grub_errno;
+
+  grub_dprintf ("bcddbg",
+                "bcd: pre-open head=%02x %02x %02x %02x %02x %02x %02x %02x\n",
+                grub_bcd_data[0], grub_bcd_data[1], grub_bcd_data[2], grub_bcd_data[3],
+                grub_bcd_data[4], grub_bcd_data[5], grub_bcd_data[6], grub_bcd_data[7]);
 
   grub_snprintf (bcd_name, 64, "mem:%p:size:%u", grub_bcd_data, bcd_len);
   bcd_file = grub_file_open (bcd_name, GRUB_FILE_TYPE_CAT);
@@ -408,16 +521,21 @@ grub_patch_bcd (struct bcd_patch_data *cmd)
    *      VHD - \\Windows\\System32\\winload.efi
    *      WIM - \\Windows\\System32\\boot\\winload.efi */
   if (cmd->winload)
+  {
+    grub_dprintf ("bcddbg", "bcd: winload explicit=%s\n", cmd->winload);
     bcd_parse_str (hive, BCDOPT_WINLOAD, 0, cmd->winload);
+  }
   else
   {
     switch (cmd->type)
     {
       case BOOT_RAW:
       case BOOT_WIM:
+        grub_dprintf ("bcddbg", "bcd: winload default=%s\n", BCD_DEFAULT_WINLOAD);
         bcd_parse_str (hive, BCDOPT_WINLOAD, 0, BCD_DEFAULT_WINLOAD);
         break;
       default:
+        grub_dprintf ("bcddbg", "bcd: winload default=%s\n", BCD_SHORT_WINLOAD);
         bcd_parse_str (hive, BCDOPT_WINLOAD, 0, BCD_SHORT_WINLOAD);
         break;
     }
@@ -442,6 +560,7 @@ grub_patch_bcd (struct bcd_patch_data *cmd)
   hive->close (hive);
 
   bcd_replace_hex (BCD_SEARCH_EXT, 8, BCD_REPLACE_EXT, 8, 0);
+  bcd_debug_dump_matches ();
 
   return GRUB_ERR_NONE;
 }

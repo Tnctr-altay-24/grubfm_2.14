@@ -221,7 +221,6 @@ static grub_err_t
 grub_cmd_loopback (grub_extcmd_context_t ctxt, int argc, char **args)
 {
   struct grub_arg_list *state = ctxt->state;
-  enum grub_file_type type = GRUB_FILE_TYPE_LOOPBACK;
 
   if (argc < 1)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, "device name required");
@@ -230,13 +229,14 @@ grub_cmd_loopback (grub_extcmd_context_t ctxt, int argc, char **args)
   if (state[0].set)
     return delete_loopback (args[0]);
 
-  if (!state[3].set)
-    type |= GRUB_FILE_TYPE_NO_DECOMPRESS;
-
   if (argc < 2)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("filename expected"));
 
-  return create_loopback (args[0], args[1], state[1].set, state[2].set, type);
+  /* Keep classic loopback behaviour: allow transparent decompression so
+     grubfm rules such as loopback wimboot ${prefix}/wimboot.xz continue
+     to work as they did in grub_alive.  */
+  return create_loopback (args[0], args[1], state[1].set, state[2].set,
+                          GRUB_FILE_TYPE_LOOPBACK);
 }
 
 static grub_err_t
