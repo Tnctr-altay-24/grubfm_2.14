@@ -24,21 +24,6 @@
 #include <grub/mm.h>
 #include <grub/types.h>
 
-#define GRUB_MEMFILE_MEM  "mem:"
-#define GRUB_MEMFILE_SIZE "size:"
-
-int
-grub_memfile_is_name (const char *name)
-{
-  if (!name)
-    return 0;
-  if (grub_strncmp (name, GRUB_MEMFILE_MEM, grub_strlen (GRUB_MEMFILE_MEM)) != 0)
-    return 0;
-  if (!grub_strstr (name, GRUB_MEMFILE_SIZE))
-    return 0;
-  return 1;
-}
-
 grub_file_t
 grub_memfile_open (const char *name)
 {
