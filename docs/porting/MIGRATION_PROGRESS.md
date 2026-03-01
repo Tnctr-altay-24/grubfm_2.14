@@ -258,6 +258,20 @@
   - 当前只是把公共判断和可用性检查抽出，尚未彻底完成“普通 loopback”和“容器 loopback”解耦。
 - 后续建议：
   - 引入独立的 `vdisk` 分发表和格式 `probe/open/read` 抽象。
+
+5. `loopback raw backend` 第一阶段拆分（未提交阶段，当前工作树）
+- 新增：
+  - `include/grub/loopback_file.h`
+  - `grub-core/disk/loopback_file.c`
+- 调整：
+  - 把 `loopback.c` 中原先混杂的 raw 文件打开、`--mem` 转内存文件、blocklist 写入准备、memfile 释放等逻辑拆出。
+  - `loopback.c` 现在只保留：
+    - 命令层
+    - loopback 设备生命周期
+    - disk read/write 桥接
+- 作用：
+  - 将 `img/iso/raw + 透明解压后的文件视图 + mem/blocklist` 明确为独立后端层。
+  - 为后续继续拆出“stream/decompress 层”和“vdisk 容器层”做准备。
   - 把容器探测从通用 file filter 链迁出，减少 `GRUB_FILE_TYPE_*` 标志交织导致的回归面。
 - 文件：`grub-core/Makefile.core.def` + 新增源码目录
 - 已补模块定义：

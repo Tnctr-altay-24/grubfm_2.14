@@ -88,3 +88,16 @@ This log tracks implementation status for virtual-disk support behind the unifie
   - `loopback` 只处理 raw/压缩/内存文件
   - `vhd` 只处理虚拟磁盘容器
   - 两条链不再通过 `file type` 标志隐式耦合
+
+## 2026-03-01 补充
+
+### loopback raw backend
+- 新增：
+  - `include/grub/loopback_file.h`
+  - `grub-core/disk/loopback_file.c`
+- 现状：
+  - `loopback.c` 不再内联处理 raw 文件后端细节。
+  - `img/iso/raw` 以及透明解压后得到的普通文件视图，统一经 `loopback_file.c` 进入 loopback 设备层。
+- 说明：
+  - 这一步还没有把 `gzio/xzio/lzopio/zstdio` 从 `grub_file_filter` 链抽离。
+  - 但已经先把“raw file backend”和“vdisk parser backend”分成了两块独立代码。

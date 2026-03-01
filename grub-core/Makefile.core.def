@@ -1487,6 +1487,7 @@ module = {
 module = {
   name = loopback;
   common = disk/loopback.c;
+  common = disk/loopback_file.c;
 };
 
 module = {
