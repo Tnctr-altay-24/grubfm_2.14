@@ -284,9 +284,15 @@ grub_loopback_open (const char *name, grub_disk_t disk)
     grub_fatal ("Reference count overflow");
 
   /* Use the filesize for the disk size, round up to a complete sector.  */
+  if (dev->file->log_sector_size >= GRUB_DISK_SECTOR_BITS)
+    disk->log_sector_size = dev->file->log_sector_size;
+
   if (dev->file->size != GRUB_FILE_SIZE_UNKNOWN)
-    disk->total_sectors = ((dev->file->size + GRUB_DISK_SECTOR_SIZE - 1)
-			   / GRUB_DISK_SECTOR_SIZE);
+    {
+      grub_uint64_t sector_size = 1ULL << disk->log_sector_size;
+      disk->total_sectors = ((dev->file->size + sector_size - 1)
+                             / sector_size);
+    }
   else
     disk->total_sectors = GRUB_DISK_SIZE_UNKNOWN;
   /* Avoid reading more than 512M.  */
@@ -296,6 +302,10 @@ grub_loopback_open (const char *name, grub_disk_t disk)
   disk->id = dev->id;
 
   disk->data = dev;
+  grub_dprintf ("portdbg",
+                "loopback_open: name=%s file=%p size=%llu log_sector=%u total=%llu\n",
+                name, dev->file, dev->file ? (unsigned long long) dev->file->size : 0ULL,
+                disk->log_sector_size, (unsigned long long) disk->total_sectors);
 
   return 0;
 }
@@ -316,20 +326,20 @@ grub_loopback_read (grub_disk_t disk, grub_disk_addr_t sector,
   grub_file_t file = ((struct grub_loopback *) disk->data)->file;
   grub_off_t pos;
 
-  grub_file_seek (file, sector << GRUB_DISK_SECTOR_BITS);
+  grub_file_seek (file, sector << disk->log_sector_size);
 
-  grub_file_read (file, buf, size << GRUB_DISK_SECTOR_BITS);
+  grub_file_read (file, buf, size << disk->log_sector_size);
   if (grub_errno)
     return grub_errno;
 
   /* In case there is more data read than there is available, in case
      of files that are not a multiple of GRUB_DISK_SECTOR_SIZE, fill
      the rest with zeros.  */
-  pos = (sector + size) << GRUB_DISK_SECTOR_BITS;
+  pos = (sector + size) << disk->log_sector_size;
   if (pos > file->size)
     {
       grub_size_t amount = pos - file->size;
-      grub_memset (buf + (size << GRUB_DISK_SECTOR_BITS) - amount, 0, amount);
+      grub_memset (buf + (size << disk->log_sector_size) - amount, 0, amount);
     }
 
   return 0;
@@ -343,8 +353,8 @@ grub_loopback_write (grub_disk_t disk,
 {
   grub_file_t file = ((struct grub_loopback *) disk->data)->file;
   return loop_file_write (file, buf,
-                          size << GRUB_DISK_SECTOR_BITS,
-                          sector << GRUB_DISK_SECTOR_BITS);
+                          size << disk->log_sector_size,
+                          sector << disk->log_sector_size);
 }
 
 static struct grub_disk_dev grub_loopback_dev =

@@ -70,6 +70,8 @@ struct grub_menu_entry
 
   int hotkey;
 
+  int hidden;
+
   int submenu;
 
   /* The next element.  */

@@ -95,7 +95,7 @@ grub_normal_add_menu_entry (int argc, const char **args,
 			    char **classes, const char *id,
 			    const char *users, const char *hotkey,
 			    const char *prefix, const char *sourcecode,
-			    int submenu, grub_blsuki_entry_t *blsuki)
+			    int hidden, int submenu, grub_blsuki_entry_t *blsuki)
 {
   int menu_hotkey = 0;
   char **menu_args = NULL;
@@ -201,6 +201,7 @@ grub_normal_add_menu_entry (int argc, const char **args,
   (*last)->title = menu_title;
   (*last)->id = menu_id;
   (*last)->hotkey = menu_hotkey;
+  (*last)->hidden = hidden;
   (*last)->classes = menu_classes;
   if (menu_users)
     (*last)->restricted = 1;
@@ -211,12 +212,13 @@ grub_normal_add_menu_entry (int argc, const char **args,
   (*last)->submenu = submenu;
   (*last)->blsuki = blsuki;
 
-  menu->size++;
+  if (!hidden)
+    menu->size++;
   grub_dprintf ("normaldbg",
-		"add_menu_entry: title=%s id=%s size=%d submenu=%d hotkey_arg=%s hotkey_code=0x%x\n",
+		"add_menu_entry: title=%s id=%s size=%d hidden=%d submenu=%d hotkey_arg=%s hotkey_code=0x%x\n",
                 (*last)->title ? (*last)->title : "(null)",
                 (*last)->id ? (*last)->id : "(null)",
-                menu->size, submenu,
+                menu->size, hidden, submenu,
 		hotkey ? hotkey : "(none)", menu_hotkey);
   return GRUB_ERR_NONE;
 
@@ -331,6 +333,7 @@ grub_cmd_menuentry (grub_extcmd_context_t ctxt, int argc, char **args)
 				       users,
 				       ctxt->state[2].arg, 0,
 				       ctxt->state[3].arg,
+				       ctxt->extcmd->cmd->name[0] == 'h',
 				       ctxt->extcmd->cmd->name[0] == 's',
 				       NULL);
 
@@ -349,6 +352,7 @@ grub_cmd_menuentry (grub_extcmd_context_t ctxt, int argc, char **args)
 				  ctxt->state[0].args, ctxt->state[4].arg,
 				  users,
 				  ctxt->state[2].arg, prefix, src + 1,
+				  ctxt->extcmd->cmd->name[0] == 'h',
 				  ctxt->extcmd->cmd->name[0] == 's', NULL);
 
   src[len - 1] = ch;

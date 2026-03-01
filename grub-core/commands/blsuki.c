@@ -1022,7 +1022,7 @@ bls_create_entry (grub_blsuki_entry_t *entry)
 			linux_cmd, initrd_cmd ? initrd_cmd : "",
 			dt_cmd ? dt_cmd : "");
 
-  grub_normal_add_menu_entry (argc, argv, classes, id, users, hotkey, NULL, src, 0, entry);
+  grub_normal_add_menu_entry (argc, argv, classes, id, users, hotkey, NULL, src, 0, 0, entry);
 
  finish:
   grub_free (linux_cmd);
@@ -1088,7 +1088,7 @@ uki_create_entry (grub_blsuki_entry_t *entry)
 			(options != NULL) ? " " : "",
 			(options != NULL) ? options : "");
 
-  grub_normal_add_menu_entry (1, argv, NULL, id, NULL, NULL, NULL, src, 0, entry);
+  grub_normal_add_menu_entry (1, argv, NULL, id, NULL, NULL, NULL, src, 0, 0, entry);
 
  finish:
   grub_free (argv);

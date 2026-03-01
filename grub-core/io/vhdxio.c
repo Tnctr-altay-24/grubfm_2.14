@@ -559,10 +559,18 @@ grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type)
       return 0;
     }
 
+  grub_dprintf ("vhdxdbg",
+                "vhdx: virtual_size=%llu block_size=%u logical_sector=%u bat_entries=%u\n",
+                (unsigned long long) vhdxio->ctx.virtual_size,
+                vhdxio->ctx.block_size,
+                vhdxio->ctx.logical_sector_size,
+                vhdxio->ctx.bat_entries);
+
   file->device = io->device;
   file->data = vhdxio;
   file->fs = &grub_vhdxio_fs;
   file->size = vhdxio->ctx.virtual_size;
+  file->log_sector_size = grub_log2ull (vhdxio->ctx.logical_sector_size);
   file->not_easily_seekable = io->not_easily_seekable;
 
   return file;

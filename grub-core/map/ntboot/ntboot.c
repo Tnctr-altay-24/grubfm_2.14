@@ -124,6 +124,9 @@ grub_cmd_ntboot (grub_extcmd_context_t ctxt,
     goto fail;
   }
 
+  grub_dprintf ("ntbootdbg", "ntboot: argc=%d arg=%s\n", argc,
+                argc > 0 && argv[0] ? argv[0] : "(none)");
+
   if (argv[0][0] == 'h')
   {
     char str[32];
@@ -138,6 +141,12 @@ grub_cmd_ntboot (grub_extcmd_context_t ctxt,
     grub_error (GRUB_ERR_FILE_READ_ERROR, N_("failed to open file"));
     goto fail;
   }
+  grub_dprintf ("ntbootdbg", "ntboot: source file=%p size=%llu path=%s disk=%s dev=%d\n",
+                file, file ? (unsigned long long) file->size : 0ULL,
+                argv[0], (file && file->device && file->device->disk
+                          && file->device->disk->name) ? file->device->disk->name : "(none)",
+                (file && file->device && file->device->disk && file->device->disk->dev)
+                  ? file->device->disk->dev->id : -1);
   if (!file->device || !check_disk (file->device->disk))
   {
     grub_error (GRUB_ERR_BAD_DEVICE,
@@ -162,6 +171,7 @@ grub_cmd_ntboot (grub_extcmd_context_t ctxt,
     type = BOOT_VHD;
   if (state[NTBOOT_WIN].set)
     type = BOOT_WIN;
+  grub_dprintf ("ntbootdbg", "ntboot: resolved type=%d path=%s\n", type, path);
 
   /* fill ntboot_cmd */
   ntcmd.type = type;
@@ -192,6 +202,8 @@ grub_cmd_ntboot (grub_extcmd_context_t ctxt,
   if (state[NTBOOT_SYSROOT].set)
     ntcmd.sysroot = state[NTBOOT_SYSROOT].arg;
   grub_patch_bcd (&ntcmd);
+  grub_dprintf ("ntbootdbg", "ntboot: patched bcd type=%d file=%p path=%s\n",
+                ntcmd.type, ntcmd.file, ntcmd.path ? ntcmd.path : "(null)");
 
   struct wimboot_cmdline wimboot_cmd =
       { 0, 1, 1, 0, 0, L"\\Windows\\System32", NULL, NULL, NULL, NULL };
@@ -206,11 +218,16 @@ grub_cmd_ntboot (grub_extcmd_context_t ctxt,
     wimboot_cmd.pause = 1;
 
   bcd = file_open ("(proc)/bcd", 0, 0, 0);
+  grub_dprintf ("ntbootdbg", "ntboot: proc bcd=%p size=%llu\n",
+                bcd, bcd ? (unsigned long long) bcd->size : 0ULL);
   vfat_add_file ("bcd", bcd, bcd->size, vfat_read_wrapper);
 
   if (state[NTBOOT_DLL].set)
   {
     vhd_dll = file_open (state[NTBOOT_DLL].arg, 0, 0, 0);
+    grub_dprintf ("ntbootdbg", "ntboot: dll=%s file=%p size=%llu\n",
+                  state[NTBOOT_DLL].arg, vhd_dll,
+                  vhd_dll ? (unsigned long long) vhd_dll->size : 0ULL);
     vfat_add_file ("bootvhd.dll", vhd_dll, vhd_dll->size, vfat_read_wrapper);
   }
 
@@ -223,6 +240,8 @@ grub_cmd_ntboot (grub_extcmd_context_t ctxt,
     grub_error (GRUB_ERR_FILE_READ_ERROR, N_("failed to open bootmgfw.efi"));
     goto fail;
   }
+  grub_dprintf ("ntbootdbg", "ntboot: bootmgr=%p size=%llu\n",
+                bootmgr, bootmgr ? (unsigned long long) bootmgr->size : 0ULL);
   wimboot_cmd.bootmgfw = vfat_add_file ("bootmgfw.efi",
                                         bootmgr, bootmgr->size, vfat_read_wrapper);
 
@@ -237,11 +256,17 @@ grub_cmd_ntboot (grub_extcmd_context_t ctxt,
       grub_error (GRUB_ERR_FILE_READ_ERROR, N_("failed to open boot.sdi"));
       goto fail;
     }
+    grub_dprintf ("ntbootdbg", "ntboot: bootsdi=%p size=%llu\n",
+                  bootsdi, bootsdi ? (unsigned long long) bootsdi->size : 0ULL);
     vfat_add_file ("boot.sdi", bootsdi, bootsdi->size, vfat_read_wrapper);
   }
+  grub_dprintf ("ntbootdbg", "ntboot: install virtual FAT pause=%d gui=%d\n",
+                wimboot_cmd.pause, wimboot_cmd.gui);
   grub_wimboot_install ();
   if (wimboot_cmd.pause)
     grub_getkey ();
+  grub_dprintf ("ntbootdbg", "ntboot: transfer to wimboot bootmgfw=%p\n",
+                wimboot_cmd.bootmgfw);
   grub_wimboot_boot (&wimboot_cmd);
   if (vhd_dll)
     grub_file_close (vhd_dll);

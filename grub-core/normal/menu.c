@@ -57,6 +57,8 @@ struct timeout_style_name {
   {NULL, 0}
 };
 
+static grub_menu_entry_t hidden_hotkey_entry;
+
 /* Wait until the user pushes any key so that the user
    can see what happened.  */
 void
@@ -81,8 +83,14 @@ grub_menu_get_entry (grub_menu_t menu, int no)
 {
   grub_menu_entry_t e;
 
-  for (e = menu->entry_list; e && no > 0; e = e->next, no--)
-    ;
+  for (e = menu->entry_list; e; e = e->next)
+    {
+      if (e->hidden)
+        continue;
+      if (no == 0)
+        break;
+      no--;
+    }
 
   return e;
 }
@@ -92,17 +100,26 @@ static int
 get_entry_index_by_hotkey (grub_menu_t menu, int hotkey)
 {
   grub_menu_entry_t entry;
-  int i;
+  int i = 0;
 
-  for (i = 0, entry = menu->entry_list; i < menu->size;
-       i++, entry = entry->next)
+  hidden_hotkey_entry = NULL;
+
+  for (entry = menu->entry_list; entry; entry = entry->next)
     if (entry->hotkey == hotkey)
       {
 	grub_dprintf ("normaldbg",
-		      "menu_hotkey: key=0x%x matched index=%d title=%s\n",
-		      hotkey, i, entry->title ? entry->title : "(null)");
-	return i;
+		      "menu_hotkey: key=0x%x matched index=%d hidden=%d title=%s\n",
+		      hotkey, i, entry->hidden,
+		      entry->title ? entry->title : "(null)");
+        if (entry->hidden)
+          {
+            hidden_hotkey_entry = entry;
+            return -2;
+          }
+		return i;
       }
+    else if (!entry->hidden)
+      i++;
 
   return -1;
 }
@@ -628,7 +645,7 @@ run_menu (grub_menu_t menu, int nested, int *auto_boot, int *notify_boot)
 	  if (key != GRUB_TERM_NO_KEY)
 	    {
 	      entry = get_entry_index_by_hotkey (menu, key);
-	      if (entry >= 0)
+	      if (entry == -2 || entry >= 0)
 		break;
 	    }
 	  if (grub_key_is_interrupt (key))
@@ -651,10 +668,10 @@ run_menu (grub_menu_t menu, int nested, int *auto_boot, int *notify_boot)
 
       grub_env_unset ("timeout");
       grub_env_unset ("timeout_style");
-      if (entry >= 0)
-	{
-	  *auto_boot = 0;
-	  return entry;
+	      if (entry == -2 || entry >= 0)
+		{
+		  *auto_boot = 0;
+		  return entry;
 	}
     }
 
@@ -800,11 +817,11 @@ run_menu (grub_menu_t menu, int nested, int *auto_boot, int *notify_boot)
 	      {
 		int entry;
 
-		entry = get_entry_index_by_hotkey (menu, c);
-		if (entry >= 0)
-		  {
-		    menu_fini ();
-		    *auto_boot = 0;
+			entry = get_entry_index_by_hotkey (menu, c);
+			if (entry == -2 || entry >= 0)
+			  {
+			    menu_fini ();
+			    *auto_boot = 0;
 		    return entry;
 		  }
 	      }
@@ -877,9 +894,18 @@ show_menu (grub_menu_t menu, int nested, int autobooted)
       int auto_boot;
       int notify_boot;
 
-      boot_entry = run_menu (menu, nested, &auto_boot, &notify_boot);
-      if (boot_entry < 0)
-	break;
+	      boot_entry = run_menu (menu, nested, &auto_boot, &notify_boot);
+	      if (boot_entry < 0)
+                {
+                  if (boot_entry == -2 && hidden_hotkey_entry)
+                    {
+                      grub_cls ();
+                      grub_menu_execute_entry (hidden_hotkey_entry, 0);
+                      hidden_hotkey_entry = NULL;
+                      continue;
+                    }
+		  break;
+                }
 
       e = grub_menu_get_entry (menu, boot_entry);
       if (! e)

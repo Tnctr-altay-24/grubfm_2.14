@@ -272,6 +272,7 @@ grub_vmdkio_open_filter (grub_file_t io, enum grub_file_type type)
   file->data = vmdkio;
   file->fs = &grub_vmdkio_fs;
   file->size = ctx->capacity_sectors * (grub_uint64_t) VMDK_SECTOR_SIZE;
+  file->log_sector_size = GRUB_DISK_SECTOR_BITS;
   file->not_easily_seekable = io->not_easily_seekable;
 
   return file;

@@ -211,7 +211,7 @@ add_menu (const char *title, const char *icon, const char *id,
     class[0] = grub_strdup (icon);
     class[1] = NULL;
     grub_normal_add_menu_entry (1, (const char **) args, class, id, NULL, hotkey,
-                                NULL, src, 0, NULL);
+                                NULL, src, 0, 0, NULL);
     if (class[0])
       grub_free (class[0]);
     if (class)
@@ -219,7 +219,7 @@ add_menu (const char *title, const char *icon, const char *id,
   }
   else
     grub_normal_add_menu_entry (1, (const char **) args, NULL, id, NULL, hotkey,
-                                NULL, src, 0, NULL);
+                                NULL, src, 0, 0, NULL);
   if (args[0])
     grub_free (args[0]);
   grub_free (args);

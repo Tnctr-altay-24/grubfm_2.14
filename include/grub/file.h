@@ -167,6 +167,10 @@ struct grub_file
   /* The file size.  */
   grub_off_t size;
 
+  /* Logical sector size in log2(bytes) when the file represents a disk image.
+     Zero means use the default 512-byte sector semantics. */
+  unsigned log_sector_size;
+
   /* If file is not easily seekable. Should be set by underlying layer.  */
   int not_easily_seekable;
 
