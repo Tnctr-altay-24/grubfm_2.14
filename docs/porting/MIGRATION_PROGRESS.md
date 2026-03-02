@@ -173,6 +173,34 @@
   - 已确认：`ini_get/lua/grubfm/map/wimboot/ntboot/efi-export-env/efi-load-env/setup_var/dp/efiusb/efiload/getenv/setenv/setkey/getkey/...`
   - 待补：`crscreenshot` 运行时行为实测（编译已通过）
 
+## G. 2026-03-02 结构解耦增量
+
+1. `memfile` 独立化
+- 新增：`include/grub/memfile.h`、`grub-core/kern/memfile.c`。
+- `mem:%p:size:%u` 识别/打开/读取从 `kern/file.c` 主路径拆出，`dd`/`lua`/`loopback` 等统一复用。
+
+2. `loopback raw backend` 拆分
+- 新增：`include/grub/loopback_file.h`、`grub-core/disk/loopback_file.c`。
+- `loopback.c` 不再内联 raw/img/iso/mem/blocklist backing file 逻辑，仅保留命令层与设备生命周期。
+
+3. `fileview` 压缩视图层
+- 新增：`include/grub/fileview.h`、`grub-core/io/fileview.c`。
+- `gzio/xzio/lzopio/zstdio` 的 `NO_DECOMPRESS` 判断和 compression 链接统一下沉到 `fileview`。
+- `offsetio` 不再直接枚举虚拟磁盘 parser。
+
+4. `vdisk` parser 注册表
+- 新增：`include/grub/vdisk.h`、`grub-core/io/vdisk.c`。
+- `vhd.mod` 不再向通用 `grub_file_filter` 注册 `vhd/vhdx/qcow2/vmdk/vdi`；改为向 `vdisk` 专用注册表显式注册。
+- `vhd` 命令改为 `raw backing file -> vdisk apply parsers` 的显式路径，消除对 generic filter 顺序的依赖。
+
+5. `vdisk` 描述符式注册
+- `vhdio.c` 已改为单个描述符表批量注册/注销 parser，统一维护 parser id/name/function。
+- `vdiskdbg` 调试域新增 parser 尝试/命中日志，便于后续回归和新格式接入。
+
+6. 当前剩余结构性工作
+- `vdisk` 各格式尚未完全统一成单一 `probe/open/read/virtual_size/logical_sector_size` 接口。
+- `fileview` 底层仍使用 `grub_file_filter` 注册机制，尚未完全脱离旧 filter 体系。
+
 ## F. 2026-02-26 增量修复
 1. `export` 语义回补（与 `grub_alive` 对齐）
 - 文件：`grub-core/normal/context.c`

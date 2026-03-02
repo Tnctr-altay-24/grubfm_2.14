@@ -158,6 +158,15 @@ grub_file_t grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type);
 grub_file_t grub_vmdkio_open_filter (grub_file_t io, enum grub_file_type type);
 grub_file_t grub_qcow2io_open_filter (grub_file_t io, enum grub_file_type type);
 
+static const struct grub_vdisk_parser_desc grub_vdisk_builtin_parsers[] =
+  {
+    { GRUB_FILE_FILTER_QCOW2IO, "qcow2", grub_qcow2io_open_filter },
+    { GRUB_FILE_FILTER_VHDXIO, "vhdx", grub_vhdxio_open_filter },
+    { GRUB_FILE_FILTER_VMDKIO, "vmdk", grub_vmdkio_open_filter },
+    { GRUB_FILE_FILTER_FIXED_VDIIO, "fixed_vdi", grub_fixed_vdiio_open_filter },
+    { GRUB_FILE_FILTER_VHDIO, "vhd", grub_vhdio_open_filter }
+  };
+
 static grub_err_t
 grub_vhdio_close (grub_file_t file)
 {
@@ -354,23 +363,12 @@ static struct grub_fs grub_vhdio_fs = {
 
 GRUB_MOD_INIT(vhd)
 {
-  grub_vdisk_register_parser (GRUB_FILE_FILTER_QCOW2IO,
-                              grub_qcow2io_open_filter);
-  grub_vdisk_register_parser (GRUB_FILE_FILTER_VHDXIO,
-                              grub_vhdxio_open_filter);
-  grub_vdisk_register_parser (GRUB_FILE_FILTER_VMDKIO,
-                              grub_vmdkio_open_filter);
-  grub_vdisk_register_parser (GRUB_FILE_FILTER_FIXED_VDIIO,
-                              grub_fixed_vdiio_open_filter);
-  grub_vdisk_register_parser (GRUB_FILE_FILTER_VHDIO,
-                              grub_vhdio_open_filter);
+  grub_vdisk_register_parsers (grub_vdisk_builtin_parsers,
+                               ARRAY_SIZE (grub_vdisk_builtin_parsers));
 }
 
 GRUB_MOD_FINI(vhd)
 {
-  grub_vdisk_unregister_parser (GRUB_FILE_FILTER_QCOW2IO);
-  grub_vdisk_unregister_parser (GRUB_FILE_FILTER_VHDXIO);
-  grub_vdisk_unregister_parser (GRUB_FILE_FILTER_VMDKIO);
-  grub_vdisk_unregister_parser (GRUB_FILE_FILTER_FIXED_VDIIO);
-  grub_vdisk_unregister_parser (GRUB_FILE_FILTER_VHDIO);
+  grub_vdisk_unregister_parsers (grub_vdisk_builtin_parsers,
+                                 ARRAY_SIZE (grub_vdisk_builtin_parsers));
 }

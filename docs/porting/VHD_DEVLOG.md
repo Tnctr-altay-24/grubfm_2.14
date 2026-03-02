@@ -123,3 +123,24 @@ This log tracks implementation status for virtual-disk support behind the unifie
   - `loopback_file` 负责 raw backing file
   - `fileview` 负责压缩流视图
   - `vdisk` 负责容器 parser 注册与分发
+
+## 2026-03-02
+
+### vdisk 分发表继续收口
+- `vhd.mod` 已不再依赖通用 `grub_file_filter` 顺序。
+- `vdisk.c` 维护专用 parser 注册表，并支持按描述符批量注册。
+- 当前 parser 表包含：`qcow2`、`vhdx`、`vmdk`、`fixed_vdi`、`vhd`。
+- 新增 `vdiskdbg` 调试输出：
+  - 尝试哪个 parser
+  - 哪个 parser 命中
+  - 命中后的逻辑扇区大小与虚拟盘大小
+
+### 当前结构边界
+- `memfile`：内存文件名与读路径
+- `loopback_file`：raw/img/iso/mem/blocklist backing file
+- `fileview`：压缩流文件视图
+- `vdisk`：虚拟磁盘容器 parser
+
+### 还需继续做的事
+- 统一各格式 parser 的接口签名，减少 `vhdio.c` 中的格式特化胶水代码。
+- 排查是否还有代码隐含依赖旧的 `GRUB_FILE_FILTER_VHD*` 注册顺序。
