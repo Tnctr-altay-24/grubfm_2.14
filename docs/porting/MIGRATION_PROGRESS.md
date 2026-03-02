@@ -197,6 +197,10 @@
 - `vhdio.c` 已改为单个描述符表批量注册/注销 parser，统一维护 parser id/name/function。
 - `vdiskdbg` 调试域新增 parser 尝试/命中日志，便于后续回归和新格式接入。
 
+7. `vdisk` parser 公共 helper
+- 新增公共 helper：`grub_vdisk_read_exact()`、`grub_vdisk_attach()`。
+- `qcow2/vhdx/vmdk/fixed_vdi/vhd` 逐步统一使用同一套精确读取与逻辑磁盘文件包装路径。
+
 6. 当前剩余结构性工作
 - `vdisk` 各格式尚未完全统一成单一 `probe/open/read/virtual_size/logical_sector_size` 接口。
 - `fileview` 底层仍使用 `grub_file_filter` 注册机制，尚未完全脱离旧 filter 体系。

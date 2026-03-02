@@ -91,21 +91,6 @@ rd_le64 (const void *p)
 }
 
 static int
-read_exact_at (grub_file_t f, grub_off_t off, void *buf, grub_size_t len)
-{
-  grub_ssize_t got;
-
-  grub_file_seek (f, off);
-  if (grub_errno != GRUB_ERR_NONE)
-    return 0;
-
-  got = grub_file_read (f, buf, len);
-  if (got < 0 || (grub_size_t) got != len)
-    return 0;
-  return 1;
-}
-
-static int
 vmdk_load_gt (struct vmdk_ctx *ctx, grub_uint32_t gt_index)
 {
   grub_uint64_t gt_sector;
@@ -134,7 +119,7 @@ vmdk_load_gt (struct vmdk_ctx *ctx, grub_uint32_t gt_index)
   if (gt_off + gt_size > ctx->file->size)
     return 0;
 
-  if (!read_exact_at (ctx->file, gt_off, ctx->gt_cache, gt_size))
+  if (!grub_vdisk_read_exact (ctx->file, gt_off, ctx->gt_cache, gt_size))
     return 0;
 
   for (i = 0; i < ctx->num_gtes_per_gt; i++)
@@ -159,7 +144,7 @@ grub_vmdkio_open_filter (grub_file_t io, enum grub_file_type type)
   if (!grub_vdisk_filter_should_open (io, type, (grub_off_t) sizeof (hdr_raw)))
     return io;
 
-  if (!read_exact_at (io, 0, hdr_raw, sizeof (hdr_raw)))
+  if (!grub_vdisk_read_exact (io, 0, hdr_raw, sizeof (hdr_raw)))
     return io;
 
   if (rd_le32 (hdr_raw + 0) != VMDK_SPARSE_MAGIC)
@@ -250,10 +235,10 @@ grub_vmdkio_open_filter (grub_file_t io, enum grub_file_type type)
   if (!ctx->gd)
     goto fail;
 
-  if (!read_exact_at (io,
-                      ctx->gd_offset_sectors * (grub_uint64_t) VMDK_SECTOR_SIZE,
-                      ctx->gd,
-                      (grub_size_t) gd_size))
+  if (!grub_vdisk_read_exact (io,
+                              ctx->gd_offset_sectors * (grub_uint64_t) VMDK_SECTOR_SIZE,
+                              ctx->gd,
+                              (grub_size_t) gd_size))
     goto fail;
 
   for (i = 0; i < ctx->num_gts; i++)
@@ -265,12 +250,9 @@ grub_vmdkio_open_filter (grub_file_t io, enum grub_file_type type)
   ctx->gt_cache_valid = 0;
   ctx->gt_cache_index = 0;
 
-  file->device = io->device;
-  file->data = vmdkio;
-  file->fs = &grub_vmdkio_fs;
-  file->size = ctx->capacity_sectors * (grub_uint64_t) VMDK_SECTOR_SIZE;
-  file->log_sector_size = GRUB_DISK_SECTOR_BITS;
-  file->not_easily_seekable = io->not_easily_seekable;
+  grub_vdisk_attach (file, io, vmdkio, &grub_vmdkio_fs,
+                     ctx->capacity_sectors * (grub_uint64_t) VMDK_SECTOR_SIZE,
+                     GRUB_DISK_SECTOR_BITS);
 
   return file;
 

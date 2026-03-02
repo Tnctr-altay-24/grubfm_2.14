@@ -47,6 +47,36 @@ grub_vdisk_filter_should_open (grub_file_t io, enum grub_file_type type,
   return 1;
 }
 
+int
+grub_vdisk_read_exact (grub_file_t file, grub_off_t off,
+                       void *buf, grub_size_t len)
+{
+  grub_ssize_t got;
+
+  grub_file_seek (file, off);
+  if (grub_errno != GRUB_ERR_NONE)
+    return 0;
+
+  got = grub_file_read (file, buf, len);
+  if (got < 0 || (grub_size_t) got != len)
+    return 0;
+
+  return 1;
+}
+
+void
+grub_vdisk_attach (grub_file_t file, grub_file_t backing, void *data,
+                   struct grub_fs *fs, grub_off_t size,
+                   grub_uint32_t log_sector_size)
+{
+  file->device = backing->device;
+  file->data = data;
+  file->fs = fs;
+  file->size = size;
+  file->log_sector_size = log_sector_size;
+  file->not_easily_seekable = backing->not_easily_seekable;
+}
+
 void
 grub_vdisk_register_parser (grub_file_filter_id_t id, grub_vdisk_parser_t parser)
 {

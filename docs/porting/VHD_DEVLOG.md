@@ -144,3 +144,8 @@ This log tracks implementation status for virtual-disk support behind the unifie
 ### 还需继续做的事
 - 统一各格式 parser 的接口签名，减少 `vhdio.c` 中的格式特化胶水代码。
 - 排查是否还有代码隐含依赖旧的 `GRUB_FILE_FILTER_VHD*` 注册顺序。
+
+### parser 公共 helper
+- 新增 `grub_vdisk_read_exact()`，统一各格式的定点精确读取。
+- 新增 `grub_vdisk_attach()`，统一各格式把 backing file 包装成逻辑磁盘文件的元数据初始化。
+- 当前 `vhd/qcow2/vmdk/vhdx/fixed_vdi` 已开始共用该层，后续可继续向统一接口过渡。

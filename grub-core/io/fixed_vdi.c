@@ -95,12 +95,8 @@ grub_fixed_vdiio_open_filter (grub_file_t io, enum grub_file_type type)
     }
   fixed_vdiio->file = io;
 
-  file->device = io->device;
-  file->data = fixed_vdiio;
-  file->fs = &grub_fixed_vdiio_fs;
-  file->size = io->size - VDI_OFFSET;
-  file->log_sector_size = GRUB_DISK_SECTOR_BITS;
-  file->not_easily_seekable = io->not_easily_seekable;
+  grub_vdisk_attach (file, io, fixed_vdiio, &grub_fixed_vdiio_fs,
+                     io->size - VDI_OFFSET, GRUB_DISK_SECTOR_BITS);
 
   return file;
 }

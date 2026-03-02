@@ -113,22 +113,6 @@ rd64 (const void *p)
 }
 
 static int
-read_exact_at (grub_file_t f, grub_off_t off, void *buf, grub_size_t len)
-{
-  grub_ssize_t got;
-
-  grub_file_seek (f, off);
-  if (grub_errno != GRUB_ERR_NONE)
-    return 0;
-
-  got = grub_file_read (f, buf, len);
-  if (got < 0 || (grub_size_t) got != len)
-    return 0;
-
-  return 1;
-}
-
-static int
 guid_eq (const grub_uint8_t *raw,
          grub_uint32_t d1, grub_uint16_t d2, grub_uint16_t d3,
          const grub_uint8_t d4[8])
@@ -194,9 +178,9 @@ load_current_header (grub_file_t io, grub_uint8_t *out_header)
   if (!h1 || !h2)
     goto fail;
 
-  if (!read_exact_at (io, VHDX_HEADER1_OFF, h1, VHDX_HEADER_BLOCK_SIZE))
+  if (!grub_vdisk_read_exact (io, VHDX_HEADER1_OFF, h1, VHDX_HEADER_BLOCK_SIZE))
     goto fail;
-  if (!read_exact_at (io, VHDX_HEADER2_OFF, h2, VHDX_HEADER_BLOCK_SIZE))
+  if (!grub_vdisk_read_exact (io, VHDX_HEADER2_OFF, h2, VHDX_HEADER_BLOCK_SIZE))
     goto fail;
 
   v1 = parse_header_block (h1, &s1);
@@ -300,12 +284,12 @@ load_region_table (grub_file_t io,
   if (!blk)
     return 0;
 
-  if (read_exact_at (io, VHDX_REGION_TBL1_OFF, blk, VHDX_HEADER_BLOCK_SIZE)
+  if (grub_vdisk_read_exact (io, VHDX_REGION_TBL1_OFF, blk, VHDX_HEADER_BLOCK_SIZE)
       && parse_region_table_block (blk, bat, meta))
     ok = 1;
 
   if (!ok
-      && read_exact_at (io, VHDX_REGION_TBL2_OFF, blk, VHDX_HEADER_BLOCK_SIZE)
+      && grub_vdisk_read_exact (io, VHDX_REGION_TBL2_OFF, blk, VHDX_HEADER_BLOCK_SIZE)
       && parse_region_table_block (blk, bat, meta))
     ok = 1;
 
@@ -340,7 +324,7 @@ parse_metadata (grub_file_t io, const struct vhdx_region_entry *meta,
   if (!tbl)
     return 0;
 
-  if (!read_exact_at (io, meta->file_offset, tbl, VHDX_METADATA_TBL_SIZE))
+  if (!grub_vdisk_read_exact (io, meta->file_offset, tbl, VHDX_METADATA_TBL_SIZE))
     goto fail;
 
   if (grub_memcmp (tbl, VHDX_SIG_METADATA, 8) != 0)
@@ -391,20 +375,20 @@ parse_metadata (grub_file_t io, const struct vhdx_region_entry *meta,
 
     if (file_param.length < 8)
       goto fail;
-    if (!read_exact_at (io, meta->file_offset + file_param.offset, tmp, 8))
+    if (!grub_vdisk_read_exact (io, meta->file_offset + file_param.offset, tmp, 8))
       goto fail;
     *block_size = rd32 (tmp + 0);
     *param_bits = rd32 (tmp + 4);
 
     if (vd_size.length < 8)
       goto fail;
-    if (!read_exact_at (io, meta->file_offset + vd_size.offset, tmp, 8))
+    if (!grub_vdisk_read_exact (io, meta->file_offset + vd_size.offset, tmp, 8))
       goto fail;
     *virtual_size = rd64 (tmp + 0);
 
     if (logical_ss.length < 4)
       goto fail;
-    if (!read_exact_at (io, meta->file_offset + logical_ss.offset, tmp, 4))
+    if (!grub_vdisk_read_exact (io, meta->file_offset + logical_ss.offset, tmp, 4))
       goto fail;
     *logical_sector_size = rd32 (tmp + 0);
   }
@@ -431,7 +415,7 @@ load_bat (grub_file_t io, const struct vhdx_region_entry *bat_r,
   if (!ctx->bat)
     return grub_errno;
 
-  if (!read_exact_at (io, bat_r->file_offset, ctx->bat, bat_r->length))
+  if (!grub_vdisk_read_exact (io, bat_r->file_offset, ctx->bat, bat_r->length))
     {
       grub_free (ctx->bat);
       ctx->bat = 0;
@@ -460,7 +444,7 @@ grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type)
                                                     + VHDX_HEADER_BLOCK_SIZE)))
     return io;
 
-  if (!read_exact_at (io, VHDX_FILE_ID_OFF, sig, sizeof (sig)))
+  if (!grub_vdisk_read_exact (io, VHDX_FILE_ID_OFF, sig, sizeof (sig)))
     return io;
   if (grub_memcmp (sig, VHDX_SIG_FILE, 8) != 0)
     return io;
@@ -565,12 +549,9 @@ grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type)
                 vhdxio->ctx.logical_sector_size,
                 vhdxio->ctx.bat_entries);
 
-  file->device = io->device;
-  file->data = vhdxio;
-  file->fs = &grub_vhdxio_fs;
-  file->size = vhdxio->ctx.virtual_size;
-  file->log_sector_size = grub_log2ull (vhdxio->ctx.logical_sector_size);
-  file->not_easily_seekable = io->not_easily_seekable;
+  grub_vdisk_attach (file, io, vhdxio, &grub_vhdxio_fs,
+                     vhdxio->ctx.virtual_size,
+                     grub_log2ull (vhdxio->ctx.logical_sector_size));
 
   return file;
 }

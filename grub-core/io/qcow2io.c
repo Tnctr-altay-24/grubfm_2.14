@@ -88,20 +88,6 @@ rd_be64 (const void *p)
 }
 
 static int
-read_exact_at (grub_file_t f, grub_off_t off, void *buf, grub_size_t len)
-{
-  grub_ssize_t got;
-
-  grub_file_seek (f, off);
-  if (grub_errno != GRUB_ERR_NONE)
-    return 0;
-  got = grub_file_read (f, buf, len);
-  if (got < 0 || (grub_size_t) got != len)
-    return 0;
-  return 1;
-}
-
-static int
 qcow2_load_l2 (struct qcow2_ctx *ctx, grub_uint64_t l2_off)
 {
   grub_size_t bytes;
@@ -114,7 +100,7 @@ qcow2_load_l2 (struct qcow2_ctx *ctx, grub_uint64_t l2_off)
   if (l2_off + bytes > (grub_uint64_t) ctx->file->size)
     return 0;
 
-  if (!read_exact_at (ctx->file, l2_off, ctx->l2_cache, bytes))
+  if (!grub_vdisk_read_exact (ctx->file, l2_off, ctx->l2_cache, bytes))
     return 0;
 
   for (i = 0; i < ctx->l2_size; i++)
@@ -139,7 +125,7 @@ grub_qcow2io_open_filter (grub_file_t io, enum grub_file_type type)
   if (!grub_vdisk_filter_should_open (io, type, (grub_off_t) sizeof (hraw)))
     return io;
 
-  if (!read_exact_at (io, 0, hraw, sizeof (hraw)))
+  if (!grub_vdisk_read_exact (io, 0, hraw, sizeof (hraw)))
     return io;
 
   h.magic = rd_be32 (hraw + 0);
@@ -226,7 +212,7 @@ grub_qcow2io_open_filter (grub_file_t io, enum grub_file_type type)
   if (!ctx->l1)
     goto fail;
 
-  if (!read_exact_at (io, h.l1_table_offset, ctx->l1, l1_bytes))
+  if (!grub_vdisk_read_exact (io, h.l1_table_offset, ctx->l1, l1_bytes))
     goto fail;
 
   for (i = 0; i < ctx->l1_size; i++)
@@ -238,12 +224,8 @@ grub_qcow2io_open_filter (grub_file_t io, enum grub_file_type type)
   ctx->l2_cache_valid = 0;
   ctx->l2_cache_off = 0;
 
-  file->device = io->device;
-  file->data = qc;
-  file->fs = &grub_qcow2io_fs;
-  file->size = ctx->virtual_size;
-  file->log_sector_size = GRUB_DISK_SECTOR_BITS;
-  file->not_easily_seekable = io->not_easily_seekable;
+  grub_vdisk_attach (file, io, qc, &grub_qcow2io_fs,
+                     ctx->virtual_size, GRUB_DISK_SECTOR_BITS);
 
   return file;
 
