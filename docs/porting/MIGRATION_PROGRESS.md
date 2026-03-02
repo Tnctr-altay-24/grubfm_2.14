@@ -222,8 +222,11 @@
 - `loopback_file` 已进一步提升为 provider 描述层：
   - `loopback_file.h` 现在公开 `provider + options + open/close/write_with`
   - `loopback.c` 的普通 `loopback` 与 `vhd` 入口已共用同一条 backend 驱动路径
+- `loopback` 设备对象现在显式记录 attached file 的 provider 关闭/写入语义：
+  - raw/mem/blocklist 仍走 `loopback_file` provider
+  - 经过 `vdisk` 变换后的逻辑磁盘文件则走通用 `grub_file_close`，写入明确返回不支持
 - 仍待继续统一的是：
-  - 更进一步把各格式内部 open 阶段的对象装配再抽成公共 helper
+  - 更进一步把各格式内部 open 阶段的上下文初始化细节继续抽成公共 helper
   - 评估后续是否需要把 `loopback_file` provider 扩展成可注册表化，而不只是默认 raw provider
 - `loopback` 与 `vhd` 虽已边界清晰，但测试体系还需保持按层回归，防止 `fileview` 与 `vdisk` 交叉回归。
 

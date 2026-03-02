@@ -103,6 +103,27 @@ grub_vdisk_create (grub_size_t object_size, struct grub_vdisk **disk_out)
   return file;
 }
 
+grub_file_t
+grub_vdisk_open (grub_size_t object_size, struct grub_vdisk **disk_out,
+                 grub_file_t backing, grub_off_t size,
+                 grub_uint32_t log_sector_size, grub_vdisk_read_t read,
+                 grub_vdisk_destroy_t destroy, const char *name)
+{
+  grub_file_t file;
+  struct grub_vdisk *disk;
+
+  file = grub_vdisk_create (object_size, &disk);
+  if (!file)
+    return 0;
+
+  grub_vdisk_init (disk, backing, size, log_sector_size, read, destroy, name);
+  grub_vdisk_attach_object (file, disk);
+
+  if (disk_out)
+    *disk_out = disk;
+  return file;
+}
+
 void
 grub_vdisk_fail (grub_file_t file, struct grub_vdisk *disk)
 {

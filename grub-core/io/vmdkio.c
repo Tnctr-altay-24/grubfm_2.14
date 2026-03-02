@@ -229,8 +229,11 @@ grub_vmdkio_open_filter (grub_file_t io, enum grub_file_type type)
       return 0;
     }
 
-  file = grub_vdisk_create (sizeof (*vmdkio),
-                            (struct grub_vdisk **) &vmdkio);
+  file = grub_vdisk_open (sizeof (*vmdkio), (struct grub_vdisk **) &vmdkio,
+                          io,
+                          h.capacity * (grub_uint64_t) VMDK_SECTOR_SIZE,
+                          GRUB_DISK_SECTOR_BITS,
+                          grub_vmdkio_read, grub_vmdkio_destroy, "vmdk");
   if (!file)
     return 0;
 
@@ -271,12 +274,6 @@ grub_vmdkio_open_filter (grub_file_t io, enum grub_file_type type)
     goto fail;
   ctx->gt_cache_valid = 0;
   ctx->gt_cache_index = 0;
-
-  grub_vdisk_init (&vmdkio->disk, io,
-                   ctx->capacity_sectors * (grub_uint64_t) VMDK_SECTOR_SIZE,
-                   GRUB_DISK_SECTOR_BITS, grub_vmdkio_read,
-                   grub_vmdkio_destroy, "vmdk");
-  grub_vdisk_attach_object (file, &vmdkio->disk);
 
   return file;
 

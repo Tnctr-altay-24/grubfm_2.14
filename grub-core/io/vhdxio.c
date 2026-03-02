@@ -467,6 +467,10 @@ grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type)
   struct vhdx_region_entry meta = {0, 0};
   grub_uint8_t hdr[VHDX_HEADER_SIZE];
   grub_uint32_t param_bits = 0;
+  grub_uint64_t virtual_size = 0;
+  grub_uint32_t block_size = 0;
+  grub_uint32_t logical_sector_size = 0;
+  grub_uint32_t chunk_ratio = 0;
 
   if (!grub_vhdxio_probe (io, type))
     return 0;
@@ -483,61 +487,61 @@ grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type)
       return 0;
     }
 
-  file = grub_vdisk_create (sizeof (*vhdxio),
-                            (struct grub_vdisk **) &vhdxio);
-  if (!file)
-    return 0;
-
-  vhdxio->ctx.file = io;
-
-  if (!parse_metadata (io, &meta,
-                       &vhdxio->ctx.block_size,
-                       &param_bits,
-                       &vhdxio->ctx.virtual_size,
-                       &vhdxio->ctx.logical_sector_size))
+  if (!parse_metadata (io, &meta, &block_size, &param_bits,
+                       &virtual_size, &logical_sector_size))
     {
       grub_error (GRUB_ERR_BAD_FILE_TYPE, "invalid VHDX metadata");
-      goto fail;
+      return 0;
     }
 
   if (param_bits & VHDX_PARAM_HAS_PARENT)
     {
       grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
                   "VHDX differencing disks are unsupported");
-      goto fail;
+      return 0;
     }
 
-  if (vhdxio->ctx.logical_sector_size != 512
-      && vhdxio->ctx.logical_sector_size != 4096)
+  if (logical_sector_size != 512
+      && logical_sector_size != 4096)
     {
       grub_error (GRUB_ERR_BAD_FILE_TYPE,
                   "unsupported VHDX logical sector size");
-      goto fail;
+      return 0;
     }
 
-  if (vhdxio->ctx.block_size == 0
-      || vhdxio->ctx.block_size > (256U * 1024U * 1024U)
-      || (vhdxio->ctx.block_size & (vhdxio->ctx.block_size - 1)) != 0)
+  if (block_size == 0
+      || block_size > (256U * 1024U * 1024U)
+      || (block_size & (block_size - 1)) != 0)
     {
       grub_error (GRUB_ERR_BAD_FILE_TYPE, "invalid VHDX block size");
-      goto fail;
+      return 0;
     }
 
-  if (vhdxio->ctx.block_size < vhdxio->ctx.logical_sector_size)
+  if (block_size < logical_sector_size)
     {
       grub_error (GRUB_ERR_BAD_FILE_TYPE, "invalid VHDX geometry");
-      goto fail;
+      return 0;
     }
 
-  vhdxio->ctx.chunk_ratio = (VHDX_MAX_SECTORS_PER_BLOCK
-                             * vhdxio->ctx.logical_sector_size)
-                            / vhdxio->ctx.block_size;
-  if (vhdxio->ctx.chunk_ratio == 0
-      || (vhdxio->ctx.chunk_ratio & (vhdxio->ctx.chunk_ratio - 1)) != 0)
+  chunk_ratio = (VHDX_MAX_SECTORS_PER_BLOCK * logical_sector_size) / block_size;
+  if (chunk_ratio == 0 || (chunk_ratio & (chunk_ratio - 1)) != 0)
     {
       grub_error (GRUB_ERR_BAD_FILE_TYPE, "invalid VHDX chunk ratio");
-      goto fail;
+      return 0;
     }
+
+  file = grub_vdisk_open (sizeof (*vhdxio), (struct grub_vdisk **) &vhdxio,
+                          io, virtual_size,
+                          grub_log2ull (logical_sector_size),
+                          grub_vhdxio_read, grub_vhdxio_destroy, "vhdx");
+  if (!file)
+    return 0;
+
+  vhdxio->ctx.file = io;
+  vhdxio->ctx.virtual_size = virtual_size;
+  vhdxio->ctx.block_size = block_size;
+  vhdxio->ctx.logical_sector_size = logical_sector_size;
+  vhdxio->ctx.chunk_ratio = chunk_ratio;
 
   if (load_bat (io, &bat, &vhdxio->ctx) != GRUB_ERR_NONE)
     goto fail;
@@ -548,11 +552,6 @@ grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type)
                 vhdxio->ctx.block_size,
                 vhdxio->ctx.logical_sector_size,
                 vhdxio->ctx.bat_entries);
-
-  grub_vdisk_init (&vhdxio->disk, io, vhdxio->ctx.virtual_size,
-                   grub_log2ull (vhdxio->ctx.logical_sector_size),
-                   grub_vhdxio_read, grub_vhdxio_destroy, "vhdx");
-  grub_vdisk_attach_object (file, &vhdxio->disk);
 
   return file;
 

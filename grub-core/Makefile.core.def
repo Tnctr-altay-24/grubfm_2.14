@@ -1197,6 +1197,7 @@ module = {
 module = {
   name = vhd;
   common = io/vdisk.c;
+  common = io/vdiskio.c;
   common = io/vhdio.c;
   common = io/fixed_vdi.c;
   common = io/vhdxio.c;

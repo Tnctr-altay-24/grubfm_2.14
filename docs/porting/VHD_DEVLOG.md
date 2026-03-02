@@ -129,6 +129,7 @@ This log tracks implementation status for virtual-disk support behind the unifie
 ### vdisk 分发表继续收口
 - `vhd.mod` 已不再依赖通用 `grub_file_filter` 顺序。
 - `vdisk.c` 维护专用 parser 注册表，并支持按描述符批量注册。
+- parser 聚合注册已从 `vhdio.c` 移到新的 `vdiskio.c`。
 - 当前 parser 表包含：`qcow2`、`vhdx`、`vmdk`、`fixed_vdi`、`vhd`。
 - parser 描述符现已统一为：
   - `probe(io, type)`：只负责格式识别与最小前置条件判断
@@ -168,4 +169,5 @@ This log tracks implementation status for virtual-disk support behind the unifie
 - 新增 `grub_vdisk_read_exact()`，统一各格式的定点精确读取。
 - 新增 `grub_vdisk_attach()`，统一各格式把 backing file 包装成逻辑磁盘文件的元数据初始化。
 - 新增 `grub_vdisk_create()` / `grub_vdisk_fail()`，统一各格式 open 阶段的 file+object 分配与失败回收。
+- 新增 `grub_vdisk_open()`，把 `create + init + attach` 进一步收敛为一步式 helper。
 - 当前 `vhd/qcow2/vmdk/vhdx/fixed_vdi` 已开始共用该层，后续可继续向统一接口过渡。

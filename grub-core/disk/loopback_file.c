@@ -162,7 +162,10 @@ grub_loopback_file_close_with (const struct grub_loopback_file_provider *provide
                                grub_file_t file)
 {
   if (!provider)
-    provider = grub_loopback_file_default_provider ();
+    {
+      grub_file_close (file);
+      return;
+    }
   if (provider->close)
     provider->close (file);
 }
@@ -173,7 +176,8 @@ grub_loopback_file_write_with (const struct grub_loopback_file_provider *provide
                                grub_size_t len, grub_off_t offset)
 {
   if (!provider)
-    provider = grub_loopback_file_default_provider ();
+    return grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
+                       "loopback file is not writable");
   if (!provider->write)
     return grub_error (GRUB_ERR_WRITE_ERROR, "loopback provider is not writable");
   return provider->write (file, buf, len, offset);

@@ -43,7 +43,7 @@
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
-static int grub_vhdio_probe (grub_file_t io, enum grub_file_type type);
+int grub_vhdio_probe (grub_file_t io, enum grub_file_type type);
 grub_file_t grub_vhdio_open_filter (grub_file_t io, enum grub_file_type type);
 
 typedef struct
@@ -152,25 +152,6 @@ struct grub_vhdio
 };
 typedef struct grub_vhdio *grub_vhdio_t;
 
-/* Additional virtual-disk parsers integrated into vhd.mod.  */
-int grub_fixed_vdiio_probe (grub_file_t io, enum grub_file_type type);
-grub_file_t grub_fixed_vdiio_open_filter (grub_file_t io, enum grub_file_type type);
-int grub_vhdxio_probe (grub_file_t io, enum grub_file_type type);
-grub_file_t grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type);
-int grub_vmdkio_probe (grub_file_t io, enum grub_file_type type);
-grub_file_t grub_vmdkio_open_filter (grub_file_t io, enum grub_file_type type);
-int grub_qcow2io_probe (grub_file_t io, enum grub_file_type type);
-grub_file_t grub_qcow2io_open_filter (grub_file_t io, enum grub_file_type type);
-
-static const struct grub_vdisk_parser_desc grub_vdisk_builtin_parsers[] =
-  {
-    { GRUB_FILE_FILTER_QCOW2IO, "qcow2", grub_qcow2io_probe, grub_qcow2io_open_filter },
-    { GRUB_FILE_FILTER_VHDXIO, "vhdx", grub_vhdxio_probe, grub_vhdxio_open_filter },
-    { GRUB_FILE_FILTER_VMDKIO, "vmdk", grub_vmdkio_probe, grub_vmdkio_open_filter },
-    { GRUB_FILE_FILTER_FIXED_VDIIO, "fixed_vdi", grub_fixed_vdiio_probe, grub_fixed_vdiio_open_filter },
-    { GRUB_FILE_FILTER_VHDIO, "vhd", grub_vhdio_probe, grub_vhdio_open_filter }
-  };
-
 static grub_ssize_t
 grub_vhdio_read (struct grub_vdisk *disk, grub_off_t off,
                  char *buf, grub_size_t len);
@@ -194,7 +175,7 @@ grub_vhdio_destroy (struct grub_vdisk *disk)
 }
 
 
-static int
+int
 grub_vhdio_probe (grub_file_t io, enum grub_file_type type)
 {
   VHDFooter footer;
@@ -232,7 +213,9 @@ grub_vhdio_open_filter (grub_file_t io, enum grub_file_type type)
   if (footer.dataOffset + sizeof(dynaheader) > io->size)
     return 0;
 
-  file = grub_vdisk_create (sizeof (*vhdio), (struct grub_vdisk **) &vhdio);
+  file = grub_vdisk_open (sizeof (*vhdio), (struct grub_vdisk **) &vhdio,
+                          io, GRUB_FILE_SIZE_UNKNOWN, GRUB_DISK_SECTOR_BITS,
+                          grub_vhdio_read, grub_vhdio_destroy, "vhd");
   if (!file)
     return 0;
   vhdfc = grub_zalloc (sizeof(VHDFileControl));
@@ -243,11 +226,6 @@ grub_vhdio_open_filter (grub_file_t io, enum grub_file_type type)
   }
   vhdio->vhdfc = vhdfc;
   vhdio->file = io;
-
-  grub_vdisk_init (&vhdio->disk, io, GRUB_FILE_SIZE_UNKNOWN,
-                   GRUB_DISK_SECTOR_BITS, grub_vhdio_read,
-                   grub_vhdio_destroy, "vhd");
-  grub_vdisk_attach_object (file, &vhdio->disk);
 
   grub_file_seek (vhdio->file, footer.dataOffset);
   if (grub_file_read (vhdio->file, &dynaheader, sizeof (dynaheader))
@@ -354,16 +332,4 @@ grub_vhdio_read (struct grub_vdisk *disk, grub_off_t off,
   }
 
   return ret;
-}
-
-GRUB_MOD_INIT(vhd)
-{
-  grub_vdisk_register_parsers (grub_vdisk_builtin_parsers,
-                               ARRAY_SIZE (grub_vdisk_builtin_parsers));
-}
-
-GRUB_MOD_FINI(vhd)
-{
-  grub_vdisk_unregister_parsers (grub_vdisk_builtin_parsers,
-                                 ARRAY_SIZE (grub_vdisk_builtin_parsers));
 }

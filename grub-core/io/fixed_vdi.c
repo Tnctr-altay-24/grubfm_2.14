@@ -90,17 +90,15 @@ grub_fixed_vdiio_open_filter (grub_file_t io, enum grub_file_type type)
   if (mbr[0] != 0x55 || mbr[1] != 0xaa)
     return 0;
 
-  file = grub_vdisk_create (sizeof (*fixed_vdiio),
-                            (struct grub_vdisk **) &fixed_vdiio);
+  file = grub_vdisk_open (sizeof (*fixed_vdiio),
+                          (struct grub_vdisk **) &fixed_vdiio,
+                          io, io->size - VDI_OFFSET, GRUB_DISK_SECTOR_BITS,
+                          grub_fixed_vdiio_read, grub_fixed_vdiio_destroy,
+                          "fixed_vdi");
   if (!file)
     return 0;
 
   fixed_vdiio->file = io;
-
-  grub_vdisk_init (&fixed_vdiio->disk, io, io->size - VDI_OFFSET,
-                   GRUB_DISK_SECTOR_BITS, grub_fixed_vdiio_read,
-                   grub_fixed_vdiio_destroy, "fixed_vdi");
-  grub_vdisk_attach_object (file, &fixed_vdiio->disk);
 
   return file;
 }

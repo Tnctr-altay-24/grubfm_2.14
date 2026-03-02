@@ -44,6 +44,14 @@ int EXPORT_FUNC(grub_vdisk_read_exact) (grub_file_t file,
                                         grub_size_t len);
 grub_file_t EXPORT_FUNC(grub_vdisk_create) (grub_size_t object_size,
                                             struct grub_vdisk **disk_out);
+grub_file_t EXPORT_FUNC(grub_vdisk_open) (grub_size_t object_size,
+                                          struct grub_vdisk **disk_out,
+                                          grub_file_t backing,
+                                          grub_off_t size,
+                                          grub_uint32_t log_sector_size,
+                                          grub_vdisk_read_t read,
+                                          grub_vdisk_destroy_t destroy,
+                                          const char *name);
 void EXPORT_FUNC(grub_vdisk_fail) (grub_file_t file,
                                    struct grub_vdisk *disk);
 void EXPORT_FUNC(grub_vdisk_attach) (grub_file_t file,

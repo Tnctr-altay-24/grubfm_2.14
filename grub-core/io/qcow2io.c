@@ -212,7 +212,9 @@ grub_qcow2io_open_filter (grub_file_t io, enum grub_file_type type)
       return 0;
     }
 
-  file = grub_vdisk_create (sizeof (*qc), (struct grub_vdisk **) &qc);
+  file = grub_vdisk_open (sizeof (*qc), (struct grub_vdisk **) &qc,
+                          io, h.size, GRUB_DISK_SECTOR_BITS,
+                          grub_qcow2io_read, grub_qcow2io_destroy, "qcow2");
   if (!file)
     return 0;
 
@@ -246,11 +248,6 @@ grub_qcow2io_open_filter (grub_file_t io, enum grub_file_type type)
     goto fail;
   ctx->l2_cache_valid = 0;
   ctx->l2_cache_off = 0;
-
-  grub_vdisk_init (&qc->disk, io, ctx->virtual_size,
-                   GRUB_DISK_SECTOR_BITS, grub_qcow2io_read,
-                   grub_qcow2io_destroy, "qcow2");
-  grub_vdisk_attach_object (file, &qc->disk);
 
   return file;
 

@@ -34,6 +34,7 @@ struct grub_loopback
 {
   char *devname;
   grub_file_t file;
+  const struct grub_loopback_file_provider *provider;
   struct grub_loopback *next;
   unsigned long id;
   grub_uint64_t refcnt;
@@ -84,14 +85,15 @@ delete_loopback (const char *name)
   *prev = dev->next;
 
   grub_free (dev->devname);
-  grub_loopback_file_close (dev->file);
+  grub_loopback_file_close_with (dev->provider, dev->file);
   grub_free (dev);
 
   return 0;
 }
 
 static grub_err_t
-create_loopback_from_file (const char *devname, grub_file_t file);
+create_loopback_from_file (const char *devname, grub_file_t file,
+                           const struct grub_loopback_file_provider *provider);
 
 static grub_err_t
 create_loopback (const char *devname, const char *filename,
@@ -127,11 +129,17 @@ create_loopback (const char *devname, const char *filename,
                          backend->name ? backend->name : "loopback");
     }
 
-  return create_loopback_from_file (devname, transformed);
+  return create_loopback_from_file (devname, transformed,
+                                    transformed == file
+                                    ? (backend && backend->provider
+                                       ? backend->provider
+                                       : grub_loopback_file_default_provider ())
+                                    : 0);
 }
 
 static grub_err_t
-create_loopback_from_file (const char *devname, grub_file_t file)
+create_loopback_from_file (const char *devname, grub_file_t file,
+                           const struct grub_loopback_file_provider *provider)
 {
   struct grub_loopback *newdev;
   grub_err_t ret;
@@ -152,6 +160,7 @@ create_loopback_from_file (const char *devname, grub_file_t file)
     }
 
   newdev->file = file;
+  newdev->provider = provider;
   newdev->id = last_id++;
   newdev->refcnt = 0;
   newdev->next = loopback_list;
@@ -160,7 +169,7 @@ create_loopback_from_file (const char *devname, grub_file_t file)
 
 fail:
   ret = grub_errno;
-  grub_loopback_file_close (file);
+  grub_loopback_file_close_with (provider, file);
   return ret;
 }
 
@@ -330,10 +339,10 @@ grub_loopback_write (grub_disk_t disk,
 		     grub_size_t size,
 		     const char *buf)
 {
-  grub_file_t file = ((struct grub_loopback *) disk->data)->file;
-  return grub_loopback_file_write (file, buf,
-                                   size << disk->log_sector_size,
-                                   sector << disk->log_sector_size);
+  struct grub_loopback *dev = disk->data;
+  return grub_loopback_file_write_with (dev->provider, dev->file, buf,
+                                        size << disk->log_sector_size,
+                                        sector << disk->log_sector_size);
 }
 
 static struct grub_disk_dev grub_loopback_dev =
