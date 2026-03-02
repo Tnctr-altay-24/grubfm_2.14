@@ -244,10 +244,10 @@ grub_vmdkio_open_filter (grub_file_t io, enum grub_file_type type)
   ctx->num_gtes_per_gt = h.num_gtes_per_gt;
   ctx->gd_offset_sectors = h.gd_offset;
 
-  ctx->num_grains = (ctx->capacity_sectors + ctx->grain_size_sectors - 1)
-                    / ctx->grain_size_sectors;
-  ctx->num_gts = (ctx->num_grains + ctx->num_gtes_per_gt - 1)
-                 / ctx->num_gtes_per_gt;
+  ctx->num_grains = grub_divmod64 (ctx->capacity_sectors + ctx->grain_size_sectors - 1,
+				   ctx->grain_size_sectors, NULL);
+  ctx->num_gts = grub_divmod64 (ctx->num_grains + ctx->num_gtes_per_gt - 1,
+				ctx->num_gtes_per_gt, NULL);
 
   gd_size = (grub_uint64_t) ctx->num_gts * sizeof (grub_uint32_t);
   if (gd_size > (grub_uint64_t) (~(grub_size_t) 0))
@@ -299,15 +299,21 @@ grub_vmdkio_read (struct grub_vdisk *disk, grub_off_t off,
     {
       grub_uint64_t cur = off;
       grub_uint64_t grain_bytes = (grub_uint64_t) ctx->grain_size_sectors * VMDK_SECTOR_SIZE;
-      grub_uint64_t grain_index = cur / grain_bytes;
-      grub_uint64_t in_grain = cur % grain_bytes;
-      grub_uint32_t chunk = (grain_bytes - in_grain > len)
-                            ? (grub_uint32_t) len
-                            : (grub_uint32_t) (grain_bytes - in_grain);
-      grub_uint32_t gt_index = grain_index / ctx->num_gtes_per_gt;
-      grub_uint32_t gte_index = grain_index % ctx->num_gtes_per_gt;
+      grub_uint64_t grain_index;
+      grub_uint64_t in_grain;
+      grub_uint64_t gte_index64;
+      grub_uint32_t gt_index;
+      grub_uint32_t gte_index;
+      grub_uint32_t chunk;
       grub_uint64_t grain_sector;
       grub_uint64_t data_off;
+
+      grain_index = grub_divmod64 (cur, grain_bytes, &in_grain);
+      gt_index = grub_divmod64 (grain_index, ctx->num_gtes_per_gt, &gte_index64);
+      gte_index = gte_index64;
+      chunk = (grain_bytes - in_grain > len)
+              ? (grub_uint32_t) len
+              : (grub_uint32_t) (grain_bytes - in_grain);
 
       if (!vmdk_load_gt (ctx, gt_index))
         return grub_error (GRUB_ERR_READ_ERROR, "failed to load VMDK grain table");

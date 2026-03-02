@@ -248,7 +248,10 @@ grub_vhdio_open_filter (grub_file_t io, enum grub_file_type type)
   vhdfc->blockSizeLog2 = log2pot32 (vhdfc->blockSize);
   vhdfc->batEntries = dynaheader.maxTableEntries;
 
-  grub_uint64_t need_blocks = (vhdfc->volumeSize + vhdfc->blockSize - 1) / vhdfc->blockSize;
+  grub_uint64_t need_blocks =
+  grub_divmod64 (vhdfc->volumeSize + vhdfc->blockSize - 1,
+                 vhdfc->blockSize, NULL);
+
   if (need_blocks > vhdfc->batEntries)
     goto fail;
 
