@@ -143,6 +143,7 @@ kernel = {
   common = kern/env.c;
   common = kern/err.c;
   common = kern/file.c;
+  common = io/fileview.c;
   common = kern/memfile.c;
   common = kern/fs.c;
   common = kern/list.c;
@@ -1952,7 +1953,6 @@ module = {
 
 module = {
   name = offsetio;
-  common = io/fileview.c;
   common = io/offset.c;
 };
 

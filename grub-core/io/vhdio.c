@@ -145,12 +145,11 @@ static void vhd_header_in (VHDDynamicDiskHeader *header)
 
 struct grub_vhdio
 {
+  struct grub_vdisk disk;
   grub_file_t file;
   VHDFileControl *vhdfc;
 };
 typedef struct grub_vhdio *grub_vhdio_t;
-
-static struct grub_fs grub_vhdio_fs;
 
 /* Additional virtual-disk parsers integrated into vhd.mod.  */
 grub_file_t grub_fixed_vdiio_open_filter (grub_file_t io, enum grub_file_type type);
@@ -167,25 +166,26 @@ static const struct grub_vdisk_parser_desc grub_vdisk_builtin_parsers[] =
     { GRUB_FILE_FILTER_VHDIO, "vhd", grub_vhdio_open_filter }
   };
 
-static grub_err_t
-grub_vhdio_close (grub_file_t file)
+static grub_ssize_t
+grub_vhdio_read (struct grub_vdisk *disk, grub_off_t off,
+                 char *buf, grub_size_t len);
+
+static void
+grub_vhdio_destroy (struct grub_vdisk *disk)
 {
-  grub_vhdio_t vhdio = file->data;
+  grub_vhdio_t vhdio = (grub_vhdio_t) disk;
   VHDFileControl *vhdfc = vhdio->vhdfc;
 
   if (vhdfc)
-  {
-    if (vhdfc->blockAllocationTable)
-      grub_free (vhdfc->blockAllocationTable);
-    if (vhdfc->blockBitmapAndData)
-      grub_free (vhdfc->blockBitmapAndData);
-    grub_free(vhdfc);
-  }
+    {
+      if (vhdfc->blockAllocationTable)
+        grub_free (vhdfc->blockAllocationTable);
+      if (vhdfc->blockBitmapAndData)
+        grub_free (vhdfc->blockBitmapAndData);
+      grub_free (vhdfc);
+    }
   grub_file_close (vhdio->file);
   grub_free (vhdio);
-  file->device = 0;
-  file->name = 0;
-  return grub_errno;
 }
 
 
@@ -237,8 +237,10 @@ grub_vhdio_open_filter (grub_file_t io, enum grub_file_type type)
   vhdio->vhdfc = vhdfc;
   vhdio->file = io;
 
-  grub_vdisk_attach (file, io, vhdio, &grub_vhdio_fs,
-                     GRUB_FILE_SIZE_UNKNOWN, GRUB_DISK_SECTOR_BITS);
+  grub_vdisk_init (&vhdio->disk, io, GRUB_FILE_SIZE_UNKNOWN,
+                   GRUB_DISK_SECTOR_BITS, grub_vhdio_read,
+                   grub_vhdio_destroy, "vhd");
+  grub_vdisk_attach_object (file, &vhdio->disk);
 
   grub_file_seek (vhdio->file, footer.dataOffset);
   if (grub_file_read (vhdio->file, &dynaheader, sizeof (dynaheader))
@@ -290,28 +292,29 @@ grub_vhdio_open_filter (grub_file_t io, enum grub_file_type type)
   return file;
 
 fail:
-  grub_vhdio_close (file);
+  grub_vhdio_destroy (&vhdio->disk);
   grub_free (file);
   return 0;
 }
 
 static grub_ssize_t
-grub_vhdio_read (grub_file_t file, char *buf, grub_size_t len)
+grub_vhdio_read (struct grub_vdisk *disk, grub_off_t off,
+                 char *buf, grub_size_t len)
 {
   grub_uint64_t ret = 0;
   grub_uint64_t rem;
-  grub_vhdio_t vhdio = file->data;
+  grub_vhdio_t vhdio = (grub_vhdio_t) disk;
   VHDFileControl *vhdfc = vhdio->vhdfc;
-  if (file->offset + len > vhdfc->volumeSize)
-    len = (file->offset <= vhdfc->volumeSize) ? vhdfc->volumeSize - file->offset : 0;
+  if (off + len > vhdfc->volumeSize)
+    len = (off <= vhdfc->volumeSize) ? vhdfc->volumeSize - off : 0;
   rem = len;
   while (rem)
   {
-    grub_uint32_t blockNumber = file->offset >> vhdfc->blockSizeLog2;
+    grub_uint32_t blockNumber = off >> vhdfc->blockSizeLog2;
     if (blockNumber >= vhdfc->batEntries)
       return grub_error (GRUB_ERR_READ_ERROR, "VHD BAT index out of range");
     grub_uint64_t blockOffset = blockNumber << vhdfc->blockSizeLog2;
-    grub_uint32_t offsetInBlock = (grub_uint32_t)(file->offset - blockOffset);
+    grub_uint32_t offsetInBlock = (grub_uint32_t)(off - blockOffset);
     grub_uint32_t txLen = (rem < vhdfc->blockSize - offsetInBlock) ?
                           rem : vhdfc->blockSize - offsetInBlock;
     grub_uint32_t blockLBA = *(grub_uint32_t*)
@@ -339,23 +342,13 @@ grub_vhdio_read (grub_file_t file, char *buf, grub_size_t len)
       grub_memmove (buf, vhdfc->blockData + offsetInBlock, txLen);
     }
     buf += txLen;
-    file->offset += txLen;
+    off += txLen;
     rem -= txLen;
     ret += txLen;
   }
 
   return ret;
 }
-
-static struct grub_fs grub_vhdio_fs = {
-  .name = "vhdio",
-  .fs_dir = 0,
-  .fs_open = 0,
-  .fs_read = grub_vhdio_read,
-  .fs_close = grub_vhdio_close,
-  .fs_label = 0,
-  .next = 0
-};
 
 GRUB_MOD_INIT(vhd)
 {

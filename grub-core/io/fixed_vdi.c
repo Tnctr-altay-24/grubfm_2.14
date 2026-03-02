@@ -39,22 +39,22 @@ typedef struct
 
 struct grub_fixed_vdiio
 {
+  struct grub_vdisk disk;
   grub_file_t file;
 };
 typedef struct grub_fixed_vdiio *grub_fixed_vdiio_t;
 
-static struct grub_fs grub_fixed_vdiio_fs;
+static grub_ssize_t
+grub_fixed_vdiio_read (struct grub_vdisk *disk, grub_off_t off,
+                       char *buf, grub_size_t len);
 
-static grub_err_t
-grub_fixed_vdiio_close (grub_file_t file)
+static void
+grub_fixed_vdiio_destroy (struct grub_vdisk *disk)
 {
-  grub_fixed_vdiio_t fixed_vdiio = file->data;
+  grub_fixed_vdiio_t fixed_vdiio = (grub_fixed_vdiio_t) disk;
 
   grub_file_close (fixed_vdiio->file);
   grub_free (fixed_vdiio);
-  file->device = 0;
-  file->name = 0;
-  return grub_errno;
 }
 
 grub_file_t
@@ -95,31 +95,22 @@ grub_fixed_vdiio_open_filter (grub_file_t io, enum grub_file_type type)
     }
   fixed_vdiio->file = io;
 
-  grub_vdisk_attach (file, io, fixed_vdiio, &grub_fixed_vdiio_fs,
-                     io->size - VDI_OFFSET, GRUB_DISK_SECTOR_BITS);
+  grub_vdisk_init (&fixed_vdiio->disk, io, io->size - VDI_OFFSET,
+                   GRUB_DISK_SECTOR_BITS, grub_fixed_vdiio_read,
+                   grub_fixed_vdiio_destroy, "fixed_vdi");
+  grub_vdisk_attach_object (file, &fixed_vdiio->disk);
 
   return file;
 }
 
 static grub_ssize_t
-grub_fixed_vdiio_read (grub_file_t file, char *buf, grub_size_t len)
+grub_fixed_vdiio_read (struct grub_vdisk *disk, grub_off_t off,
+                       char *buf, grub_size_t len)
 {
-  grub_fixed_vdiio_t fixed_vdiio = file->data;
+  grub_fixed_vdiio_t fixed_vdiio = (grub_fixed_vdiio_t) disk;
   grub_ssize_t ret;
 
-  grub_file_seek (fixed_vdiio->file, file->offset + VDI_OFFSET);
+  grub_file_seek (fixed_vdiio->file, off + VDI_OFFSET);
   ret = grub_file_read (fixed_vdiio->file, buf, len);
-  if (ret > 0)
-    file->offset += ret;
   return ret;
 }
-
-static struct grub_fs grub_fixed_vdiio_fs = {
-  .name = "fixed_vdiio",
-  .fs_dir = 0,
-  .fs_open = 0,
-  .fs_read = grub_fixed_vdiio_read,
-  .fs_close = grub_fixed_vdiio_close,
-  .fs_label = 0,
-  .next = 0
-};

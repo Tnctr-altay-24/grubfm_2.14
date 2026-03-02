@@ -538,10 +538,10 @@ static struct grub_fs grub_lzopio_fs = {
 
 GRUB_MOD_INIT (lzopio)
 {
-  grub_file_filter_register (GRUB_FILE_FILTER_LZOPIO, grub_lzopio_open);
+  grub_fileview_register (GRUB_FILE_FILTER_LZOPIO, "lzopio", grub_lzopio_open);
 }
 
 GRUB_MOD_FINI (lzopio)
 {
-  grub_file_filter_unregister (GRUB_FILE_FILTER_LZOPIO);
+  grub_fileview_unregister (GRUB_FILE_FILTER_LZOPIO);
 }

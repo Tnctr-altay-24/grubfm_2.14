@@ -26,6 +26,7 @@
 #include <grub/device.h>
 #include <grub/i18n.h>
 #include <grub/dl.h>
+#include <grub/fileview.h>
 #include <grub/memfile.h>
 
 void (*EXPORT_VAR (grub_grubnet_fini)) (void);
@@ -138,6 +139,9 @@ grub_file_open (const char *name, enum grub_file_type type)
        filter++)
     if (grub_file_filters[filter])
       {
+        if (filter >= GRUB_FILE_FILTER_COMPRESSION_FIRST
+            && filter <= GRUB_FILE_FILTER_COMPRESSION_LAST)
+          continue;
 	last_file = file;
 	file = grub_file_filters[filter] (file, type);
 	if (file && file != last_file)
@@ -146,6 +150,16 @@ grub_file_open (const char *name, enum grub_file_type type)
 	    grub_errno = GRUB_ERR_NONE;
 	  }
       }
+  if (file)
+    {
+      last_file = file;
+      file = grub_fileview_apply_compression (file, type);
+      if (file && file != last_file)
+        {
+          file->name = grub_strdup (name);
+          grub_errno = GRUB_ERR_NONE;
+        }
+    }
   if (!file)
     grub_file_close (last_file);
 

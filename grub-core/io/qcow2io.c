@@ -64,12 +64,11 @@ struct qcow2_ctx
 
 struct grub_qcow2io
 {
+  struct grub_vdisk disk;
   struct qcow2_ctx ctx;
 };
 
 typedef struct grub_qcow2io *grub_qcow2io_t;
-
-static struct grub_fs grub_qcow2io_fs;
 
 static grub_uint32_t
 rd_be32 (const void *p)
@@ -85,6 +84,21 @@ rd_be64 (const void *p)
   grub_uint64_t v;
   grub_memcpy (&v, p, sizeof (v));
   return grub_be_to_cpu64 (v);
+}
+
+static grub_ssize_t
+grub_qcow2io_read (struct grub_vdisk *disk, grub_off_t off,
+                   char *buf, grub_size_t len);
+
+static void
+grub_qcow2io_destroy (struct grub_vdisk *disk)
+{
+  grub_qcow2io_t qc = (grub_qcow2io_t) disk;
+
+  grub_free (qc->ctx.l2_cache);
+  grub_free (qc->ctx.l1);
+  grub_file_close (qc->ctx.file);
+  grub_free (qc);
 }
 
 static int
@@ -224,8 +238,10 @@ grub_qcow2io_open_filter (grub_file_t io, enum grub_file_type type)
   ctx->l2_cache_valid = 0;
   ctx->l2_cache_off = 0;
 
-  grub_vdisk_attach (file, io, qc, &grub_qcow2io_fs,
-                     ctx->virtual_size, GRUB_DISK_SECTOR_BITS);
+  grub_vdisk_init (&qc->disk, io, ctx->virtual_size,
+                   GRUB_DISK_SECTOR_BITS, grub_qcow2io_read,
+                   grub_qcow2io_destroy, "qcow2");
+  grub_vdisk_attach_object (file, &qc->disk);
 
   return file;
 
@@ -241,23 +257,24 @@ fail:
 }
 
 static grub_ssize_t
-grub_qcow2io_read (grub_file_t file, char *buf, grub_size_t len)
+grub_qcow2io_read (struct grub_vdisk *disk, grub_off_t off,
+                   char *buf, grub_size_t len)
 {
-  grub_qcow2io_t qc = file->data;
+  grub_qcow2io_t qc = (grub_qcow2io_t) disk;
   struct qcow2_ctx *ctx = &qc->ctx;
   grub_size_t done = 0;
 
-  if (file->offset >= (grub_off_t) file->size)
+  if (off >= (grub_off_t) disk->size)
     return 0;
-  if (file->offset + len > (grub_off_t) file->size)
-    len = file->size - file->offset;
+  if (off + len > (grub_off_t) disk->size)
+    len = disk->size - off;
 
   while (len > 0)
     {
-      grub_uint64_t off = file->offset;
-      grub_uint64_t l1_index = off >> (ctx->cluster_bits + (ctx->cluster_bits - 3));
-      grub_uint64_t l2_index = (off >> ctx->cluster_bits) & ctx->l2_mask;
-      grub_uint64_t in_cluster = off & ctx->cluster_mask;
+      grub_uint64_t cur = off;
+      grub_uint64_t l1_index = cur >> (ctx->cluster_bits + (ctx->cluster_bits - 3));
+      grub_uint64_t l2_index = (cur >> ctx->cluster_bits) & ctx->l2_mask;
+      grub_uint64_t in_cluster = cur & ctx->cluster_mask;
       grub_uint32_t chunk = (ctx->cluster_size - in_cluster > len)
                             ? (grub_uint32_t) len
                             : (grub_uint32_t) (ctx->cluster_size - in_cluster);
@@ -303,38 +320,10 @@ grub_qcow2io_read (grub_file_t file, char *buf, grub_size_t len)
 
 next:
       buf += chunk;
-      file->offset += chunk;
+      off += chunk;
       len -= chunk;
       done += chunk;
     }
 
   return done;
 }
-
-static grub_err_t
-grub_qcow2io_close (grub_file_t file)
-{
-  grub_qcow2io_t qc = file->data;
-
-  if (qc)
-    {
-      grub_free (qc->ctx.l2_cache);
-      grub_free (qc->ctx.l1);
-      grub_file_close (qc->ctx.file);
-      grub_free (qc);
-    }
-
-  file->device = 0;
-  file->name = 0;
-  return grub_errno;
-}
-
-static struct grub_fs grub_qcow2io_fs = {
-  .name = "qcow2io",
-  .fs_dir = 0,
-  .fs_open = 0,
-  .fs_read = grub_qcow2io_read,
-  .fs_close = grub_qcow2io_close,
-  .fs_label = 0,
-  .next = 0
-};

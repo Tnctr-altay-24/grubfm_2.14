@@ -197,13 +197,27 @@
 - `vhdio.c` 已改为单个描述符表批量注册/注销 parser，统一维护 parser id/name/function。
 - `vdiskdbg` 调试域新增 parser 尝试/命中日志，便于后续回归和新格式接入。
 
+6. `fileview` 独立注册表
+- `gzio/xzio/lzopio/zstdio` 已不再直接依赖通用 `grub_file_filter` 迭代顺序。
+- `fileview.c` 维护独立的 compression transform 注册表与应用顺序。
+- `kern/file.c` 现在先跳过 compression filter 段，再显式调用 `grub_fileview_apply_compression()`。
+
 7. `vdisk` parser 公共 helper
 - 新增公共 helper：`grub_vdisk_read_exact()`、`grub_vdisk_attach()`。
 - `qcow2/vhdx/vmdk/fixed_vdi/vhd` 逐步统一使用同一套精确读取与逻辑磁盘文件包装路径。
 
-6. 当前剩余结构性工作
-- `vdisk` 各格式尚未完全统一成单一 `probe/open/read/virtual_size/logical_sector_size` 接口。
-- `fileview` 底层仍使用 `grub_file_filter` 注册机制，尚未完全脱离旧 filter 体系。
+8. `vdisk` 统一对象接口
+- `struct grub_vdisk` 已建立，统一承载：
+  - backing file
+  - virtual size
+  - logical sector size
+  - read callback
+  - destroy callback
+- `qcow2/vhdx/vmdk/fixed_vdi/vhd` 已开始通过 `grub_vdisk_init()` / `grub_vdisk_attach_object()` 接入。
+
+9. 当前剩余结构性工作
+- `vdisk` 各格式尚未完全收敛成单一的 `probe/open/read/virtual_size/logical_sector_size` 描述符对象；目前 `read/size/log_sector_size` 已统一，`probe/open` 仍分散在各格式源文件。
+- `loopback` 与 `vhd` 虽已边界清晰，但测试体系还需保持按层回归，防止 `fileview` 与 `vdisk` 交叉回归。
 
 ## F. 2026-02-26 增量修复
 1. `export` 语义回补（与 `grub_alive` 对齐）

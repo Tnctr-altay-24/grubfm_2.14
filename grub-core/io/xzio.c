@@ -338,10 +338,10 @@ static struct grub_fs grub_xzio_fs = {
 
 GRUB_MOD_INIT (xzio)
 {
-  grub_file_filter_register (GRUB_FILE_FILTER_XZIO, grub_xzio_open);
+  grub_fileview_register (GRUB_FILE_FILTER_XZIO, "xzio", grub_xzio_open);
 }
 
 GRUB_MOD_FINI (xzio)
 {
-  grub_file_filter_unregister (GRUB_FILE_FILTER_XZIO);
+  grub_fileview_unregister (GRUB_FILE_FILTER_XZIO);
 }

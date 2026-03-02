@@ -135,6 +135,14 @@ This log tracks implementation status for virtual-disk support behind the unifie
   - 哪个 parser 命中
   - 命中后的逻辑扇区大小与虚拟盘大小
 
+### fileview 独立化
+- `fileview.c` 现在维护 compression transform 专用注册表。
+- `gzio/xzio/lzopio/zstdio` 均改为向 `fileview` 注册，而不是依赖通用 filter 顺序。
+- `kern/file.c` 会显式调用 `grub_fileview_apply_compression()`，因此：
+  - raw/img/iso 路径先走 `loopback_file`
+  - 压缩流路径再走 `fileview`
+  - 虚拟磁盘容器最后才走 `vdisk`
+
 ### 当前结构边界
 - `memfile`：内存文件名与读路径
 - `loopback_file`：raw/img/iso/mem/blocklist backing file
@@ -142,8 +150,11 @@ This log tracks implementation status for virtual-disk support behind the unifie
 - `vdisk`：虚拟磁盘容器 parser
 
 ### 还需继续做的事
-- 统一各格式 parser 的接口签名，减少 `vhdio.c` 中的格式特化胶水代码。
-- 排查是否还有代码隐含依赖旧的 `GRUB_FILE_FILTER_VHD*` 注册顺序。
+- 统一各格式 parser 的 `probe/open` 入口签名，减少 `vhdio.c` 中的格式特化胶水代码。
+- 继续做按层回归：
+  - `loopback_file`：raw/img/iso
+  - `fileview`：xz/cpio helper archive
+  - `vdisk`：vhd/vhdx/qcow2/vmdk/vdi
 
 ### parser 公共 helper
 - 新增 `grub_vdisk_read_exact()`，统一各格式的定点精确读取。

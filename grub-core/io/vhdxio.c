@@ -81,12 +81,11 @@ struct vhdx_ctx
 
 struct grub_vhdxio
 {
+  struct grub_vdisk disk;
   struct vhdx_ctx ctx;
 };
 
 typedef struct grub_vhdxio *grub_vhdxio_t;
-
-static struct grub_fs grub_vhdxio_fs;
 
 static grub_uint16_t
 rd16 (const void *p)
@@ -110,6 +109,20 @@ rd64 (const void *p)
   grub_uint64_t v;
   grub_memcpy (&v, p, sizeof (v));
   return grub_le_to_cpu64 (v);
+}
+
+static grub_ssize_t
+grub_vhdxio_read (struct grub_vdisk *disk, grub_off_t off,
+                  char *buf, grub_size_t len);
+
+static void
+grub_vhdxio_destroy (struct grub_vdisk *disk)
+{
+  grub_vhdxio_t vhdxio = (grub_vhdxio_t) disk;
+
+  grub_free (vhdxio->ctx.bat);
+  grub_file_close (vhdxio->ctx.file);
+  grub_free (vhdxio);
 }
 
 static int
@@ -549,30 +562,32 @@ grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type)
                 vhdxio->ctx.logical_sector_size,
                 vhdxio->ctx.bat_entries);
 
-  grub_vdisk_attach (file, io, vhdxio, &grub_vhdxio_fs,
-                     vhdxio->ctx.virtual_size,
-                     grub_log2ull (vhdxio->ctx.logical_sector_size));
+  grub_vdisk_init (&vhdxio->disk, io, vhdxio->ctx.virtual_size,
+                   grub_log2ull (vhdxio->ctx.logical_sector_size),
+                   grub_vhdxio_read, grub_vhdxio_destroy, "vhdx");
+  grub_vdisk_attach_object (file, &vhdxio->disk);
 
   return file;
 }
 
 static grub_ssize_t
-grub_vhdxio_read (grub_file_t file, char *buf, grub_size_t len)
+grub_vhdxio_read (struct grub_vdisk *disk, grub_off_t off,
+                  char *buf, grub_size_t len)
 {
-  grub_vhdxio_t vhdxio = file->data;
+  grub_vhdxio_t vhdxio = (grub_vhdxio_t) disk;
   struct vhdx_ctx *ctx = &vhdxio->ctx;
   grub_size_t total = 0;
 
-  if (file->offset >= (grub_off_t) ctx->virtual_size)
+  if (off >= (grub_off_t) ctx->virtual_size)
     return 0;
-  if (file->offset + len > (grub_off_t) ctx->virtual_size)
-    len = ctx->virtual_size - file->offset;
+  if (off + len > (grub_off_t) ctx->virtual_size)
+    len = ctx->virtual_size - off;
 
   while (len > 0)
     {
-      grub_uint64_t off = file->offset;
-      grub_uint64_t block_idx = off / ctx->block_size;
-      grub_uint32_t within = off % ctx->block_size;
+      grub_uint64_t cur = off;
+      grub_uint64_t block_idx = cur / ctx->block_size;
+      grub_uint32_t within = cur % ctx->block_size;
       grub_uint32_t can = ctx->block_size - within;
       grub_uint64_t bat_idx = block_idx + (block_idx / ctx->chunk_ratio);
       grub_uint64_t entry;
@@ -630,37 +645,10 @@ grub_vhdxio_read (grub_file_t file, char *buf, grub_size_t len)
         }
 
       buf += can;
-      file->offset += can;
+      off += can;
       len -= can;
       total += can;
     }
 
   return total;
 }
-
-static grub_err_t
-grub_vhdxio_close (grub_file_t file)
-{
-  grub_vhdxio_t vhdxio = file->data;
-
-  if (vhdxio)
-    {
-      grub_free (vhdxio->ctx.bat);
-      grub_file_close (vhdxio->ctx.file);
-      grub_free (vhdxio);
-    }
-
-  file->device = 0;
-  file->name = 0;
-  return grub_errno;
-}
-
-static struct grub_fs grub_vhdxio_fs = {
-  .name = "vhdxio",
-  .fs_dir = 0,
-  .fs_open = 0,
-  .fs_read = grub_vhdxio_read,
-  .fs_close = grub_vhdxio_close,
-  .fs_label = 0,
-  .next = 0
-};

@@ -1454,10 +1454,10 @@ static struct grub_fs grub_gzio_fs =
 
 GRUB_MOD_INIT(gzio)
 {
-  grub_file_filter_register (GRUB_FILE_FILTER_GZIO, grub_gzio_open);
+  grub_fileview_register (GRUB_FILE_FILTER_GZIO, "gzio", grub_gzio_open);
 }
 
 GRUB_MOD_FINI(gzio)
 {
-  grub_file_filter_unregister (GRUB_FILE_FILTER_GZIO);
+  grub_fileview_unregister (GRUB_FILE_FILTER_GZIO);
 }

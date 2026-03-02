@@ -243,10 +243,10 @@ static struct grub_fs zstdio_fs = {
 
 GRUB_MOD_INIT (zstdio)
 {
-  grub_file_filter_register (GRUB_FILE_FILTER_ZSTDIO, grub_zstdio_open);
+  grub_fileview_register (GRUB_FILE_FILTER_ZSTDIO, "zstdio", grub_zstdio_open);
 }
 
 GRUB_MOD_FINI (zstdio)
 {
-  grub_file_filter_unregister (GRUB_FILE_FILTER_ZSTDIO);
+  grub_fileview_unregister (GRUB_FILE_FILTER_ZSTDIO);
 }

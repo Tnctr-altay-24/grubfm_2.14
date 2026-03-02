@@ -59,12 +59,11 @@ struct vmdk_ctx
 
 struct grub_vmdkio
 {
+  struct grub_vdisk disk;
   struct vmdk_ctx ctx;
 };
 
 typedef struct grub_vmdkio *grub_vmdkio_t;
-
-static struct grub_fs grub_vmdkio_fs;
 
 static grub_uint16_t
 rd_le16 (const void *p)
@@ -88,6 +87,21 @@ rd_le64 (const void *p)
   grub_uint64_t v;
   grub_memcpy (&v, p, sizeof (v));
   return grub_le_to_cpu64 (v);
+}
+
+static grub_ssize_t
+grub_vmdkio_read (struct grub_vdisk *disk, grub_off_t off,
+                  char *buf, grub_size_t len);
+
+static void
+grub_vmdkio_destroy (struct grub_vdisk *disk)
+{
+  grub_vmdkio_t vmdkio = (grub_vmdkio_t) disk;
+
+  grub_free (vmdkio->ctx.gt_cache);
+  grub_free (vmdkio->ctx.gd);
+  grub_file_close (vmdkio->ctx.file);
+  grub_free (vmdkio);
 }
 
 static int
@@ -250,9 +264,11 @@ grub_vmdkio_open_filter (grub_file_t io, enum grub_file_type type)
   ctx->gt_cache_valid = 0;
   ctx->gt_cache_index = 0;
 
-  grub_vdisk_attach (file, io, vmdkio, &grub_vmdkio_fs,
-                     ctx->capacity_sectors * (grub_uint64_t) VMDK_SECTOR_SIZE,
-                     GRUB_DISK_SECTOR_BITS);
+  grub_vdisk_init (&vmdkio->disk, io,
+                   ctx->capacity_sectors * (grub_uint64_t) VMDK_SECTOR_SIZE,
+                   GRUB_DISK_SECTOR_BITS, grub_vmdkio_read,
+                   grub_vmdkio_destroy, "vmdk");
+  grub_vdisk_attach_object (file, &vmdkio->disk);
 
   return file;
 
@@ -268,23 +284,24 @@ fail:
 }
 
 static grub_ssize_t
-grub_vmdkio_read (grub_file_t file, char *buf, grub_size_t len)
+grub_vmdkio_read (struct grub_vdisk *disk, grub_off_t off,
+                  char *buf, grub_size_t len)
 {
-  grub_vmdkio_t vmdkio = file->data;
+  grub_vmdkio_t vmdkio = (grub_vmdkio_t) disk;
   struct vmdk_ctx *ctx = &vmdkio->ctx;
   grub_size_t done = 0;
 
-  if (file->offset >= (grub_off_t) file->size)
+  if (off >= (grub_off_t) disk->size)
     return 0;
-  if (file->offset + len > (grub_off_t) file->size)
-    len = file->size - file->offset;
+  if (off + len > (grub_off_t) disk->size)
+    len = disk->size - off;
 
   while (len > 0)
     {
-      grub_uint64_t off = file->offset;
+      grub_uint64_t cur = off;
       grub_uint64_t grain_bytes = (grub_uint64_t) ctx->grain_size_sectors * VMDK_SECTOR_SIZE;
-      grub_uint64_t grain_index = off / grain_bytes;
-      grub_uint64_t in_grain = off % grain_bytes;
+      grub_uint64_t grain_index = cur / grain_bytes;
+      grub_uint64_t in_grain = cur % grain_bytes;
       grub_uint32_t chunk = (grain_bytes - in_grain > len)
                             ? (grub_uint32_t) len
                             : (grub_uint32_t) (grain_bytes - in_grain);
@@ -313,38 +330,10 @@ grub_vmdkio_read (grub_file_t file, char *buf, grub_size_t len)
         }
 
       buf += chunk;
-      file->offset += chunk;
+      off += chunk;
       len -= chunk;
       done += chunk;
     }
 
   return done;
 }
-
-static grub_err_t
-grub_vmdkio_close (grub_file_t file)
-{
-  grub_vmdkio_t vmdkio = file->data;
-
-  if (vmdkio)
-    {
-      grub_free (vmdkio->ctx.gt_cache);
-      grub_free (vmdkio->ctx.gd);
-      grub_file_close (vmdkio->ctx.file);
-      grub_free (vmdkio);
-    }
-
-  file->device = 0;
-  file->name = 0;
-  return grub_errno;
-}
-
-static struct grub_fs grub_vmdkio_fs = {
-  .name = "vmdkio",
-  .fs_dir = 0,
-  .fs_open = 0,
-  .fs_read = grub_vmdkio_read,
-  .fs_close = grub_vmdkio_close,
-  .fs_label = 0,
-  .next = 0
-};

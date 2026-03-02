@@ -32,6 +32,20 @@ static const grub_file_filter_id_t grub_vdisk_parser_order[] =
     GRUB_FILE_FILTER_VHDIO
   };
 
+static grub_ssize_t grub_vdisk_file_read (grub_file_t file, char *buf,
+                                          grub_size_t len);
+static grub_err_t grub_vdisk_file_close (grub_file_t file);
+static struct grub_fs grub_vdisk_fs =
+  {
+    .name = "vdisk",
+    .fs_dir = 0,
+    .fs_open = 0,
+    .fs_read = grub_vdisk_file_read,
+    .fs_close = grub_vdisk_file_close,
+    .fs_label = 0,
+    .next = 0
+  };
+
 int
 grub_vdisk_filter_should_open (grub_file_t io, enum grub_file_type type,
                                grub_off_t min_size)
@@ -75,6 +89,53 @@ grub_vdisk_attach (grub_file_t file, grub_file_t backing, void *data,
   file->size = size;
   file->log_sector_size = log_sector_size;
   file->not_easily_seekable = backing->not_easily_seekable;
+}
+
+void
+grub_vdisk_init (struct grub_vdisk *disk, grub_file_t backing,
+                 grub_off_t size, grub_uint32_t log_sector_size,
+                 grub_vdisk_read_t read, grub_vdisk_destroy_t destroy,
+                 const char *name)
+{
+  disk->backing = backing;
+  disk->size = size;
+  disk->log_sector_size = log_sector_size;
+  disk->read = read;
+  disk->destroy = destroy;
+  disk->name = name;
+}
+
+void
+grub_vdisk_attach_object (grub_file_t file, struct grub_vdisk *disk)
+{
+  grub_vdisk_attach (file, disk->backing, disk, &grub_vdisk_fs,
+                     disk->size, disk->log_sector_size);
+}
+
+static grub_ssize_t
+grub_vdisk_file_read (grub_file_t file, char *buf, grub_size_t len)
+{
+  struct grub_vdisk *disk = file->data;
+  grub_ssize_t ret;
+
+  ret = disk->read (disk, file->offset, buf, len);
+  if (ret > 0)
+    file->offset += ret;
+
+  return ret;
+}
+
+static grub_err_t
+grub_vdisk_file_close (grub_file_t file)
+{
+  struct grub_vdisk *disk = file->data;
+
+  if (disk && disk->destroy)
+    disk->destroy (disk);
+
+  file->device = 0;
+  file->name = 0;
+  return grub_errno;
 }
 
 void
