@@ -146,7 +146,7 @@ grub_cmd_ntboot (grub_extcmd_context_t ctxt,
                 argv[0], (file && file->device && file->device->disk
                           && file->device->disk->name) ? file->device->disk->name : "(none)",
                 (file && file->device && file->device->disk && file->device->disk->dev)
-                  ? file->device->disk->dev->id : -1);
+                  ? (int) file->device->disk->dev->id : -1);
   if (!file->device || !check_disk (file->device->disk))
   {
     grub_error (GRUB_ERR_BAD_DEVICE,

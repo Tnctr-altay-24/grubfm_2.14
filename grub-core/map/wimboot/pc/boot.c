@@ -52,16 +52,20 @@ void grub_wimboot_boot (struct wimboot_cmdline *cmd)
     file = &vfat_files[i];
     if (!file->opaque)
       break;
-    if (strcasecmp (file->name, "bootmgfw.efi") == 0)
+    if (grub_strcasecmp (file->name, "bootmgfw.efi") == 0)
     {
+      grub_size_t used = grub_strlen (initrd);
       grub_printf ("...rename %s to bootmgr.exe.\n", file->name);
-      grub_sprintf (initrd + strlen (initrd),
-                    " newc:bootmgr.exe:(vfat,1)/%s", file->name);
+      if (used < sizeof (initrd))
+        grub_snprintf (initrd + used, sizeof (initrd) - used,
+                       " newc:bootmgr.exe:(vfat,1)/%s", file->name);
     }
     else
     {
-      grub_sprintf (initrd + strlen (initrd), " newc:%s:(vfat,1)/%s",
-                    file->name, file->name);
+      grub_size_t used = grub_strlen (initrd);
+      if (used < sizeof (initrd))
+        grub_snprintf (initrd + used, sizeof (initrd) - used,
+                       " newc:%s:(vfat,1)/%s", file->name, file->name);
       grub_printf ("...add newc:%s\n", file->name);
     }
   }

@@ -32,6 +32,10 @@
 #include <vfat.h>
 #include <misc.h>
 
+#ifndef GRUB_DISK_DEVICE_VFAT_ID
+#define GRUB_DISK_DEVICE_VFAT_ID 1001
+#endif
+
 struct grub_vfatdisk_file *vfat_file_list;
 
 static int
