@@ -24,7 +24,9 @@
 #include <grub/disk.h>
 #include <grub/loader.h>
 #include <grub/env.h>
+#ifdef GRUB_MACHINE_PCBIOS
 #include <grub/machine/biosnum.h>
+#endif
 #include <grub/i18n.h>
 #include <grub/memory.h>
 #include <grub/machine/memory.h>
@@ -34,7 +36,11 @@
 GRUB_MOD_LICENSE ("GPLv3+");
 
 /* Real mode IVT slot (seg:off far pointer) for interrupt 0x13.  */
-static grub_uint32_t *const int13slot = (grub_uint32_t *) (4 * 0x13);
+static inline grub_uint32_t *
+grub_int13_slot (void)
+{
+  return (grub_uint32_t *) grub_absolute_pointer (4 * 0x13);
+}
 
 /* Remember to update enum opt_idxs accordingly.  */
 static const struct grub_arg_option options[] = {
@@ -276,6 +282,7 @@ grub_cmd_drivemap (struct grub_extcmd_context *ctxt, int argc, char **args)
 static grub_err_t
 install_int13_handler (int noret __attribute__ ((unused)))
 {
+  grub_uint32_t *int13slot = grub_int13_slot ();
   /* Size of the full int13 handler "bundle", including code and map.  */
   grub_uint32_t total_size;
   /* Base address of the space reserved for the handler bundle.  */
@@ -356,6 +363,8 @@ install_int13_handler (int noret __attribute__ ((unused)))
 static grub_err_t
 uninstall_int13_handler (void)
 {
+  grub_uint32_t *int13slot = grub_int13_slot ();
+
   if (! grub_drivemap_oldhandler)
     return GRUB_ERR_NONE;
 
@@ -368,6 +377,7 @@ uninstall_int13_handler (void)
   return GRUB_ERR_NONE;
 }
 
+#ifdef GRUB_MACHINE_PCBIOS
 static int
 grub_get_root_biosnumber_drivemap (void)
 {
@@ -403,6 +413,7 @@ grub_get_root_biosnumber_drivemap (void)
 
   return ret;
 }
+#endif
 
 static grub_err_t
 grub_cmd_vt_acpi (struct grub_extcmd_context *ctxt __attribute__ ((unused)),
@@ -415,7 +426,9 @@ grub_cmd_vt_acpi (struct grub_extcmd_context *ctxt __attribute__ ((unused)),
 }
 
 static grub_extcmd_t cmd, cmd1, cmd_vtacpi;
+#ifdef GRUB_MACHINE_PCBIOS
 static int (*grub_get_root_biosnumber_saved) (void);
+#endif
 
 GRUB_MOD_INIT (map)
 {
@@ -423,8 +436,10 @@ GRUB_MOD_INIT (map)
   if (!grub_mb_check_bios_int (0x13))
     return;
 #endif
+#ifdef GRUB_MACHINE_PCBIOS
   grub_get_root_biosnumber_saved = grub_get_root_biosnumber;
   grub_get_root_biosnumber = grub_get_root_biosnumber_drivemap;
+#endif
   cmd = grub_register_extcmd ("map", grub_cmd_drivemap, 0,
                     N_("-l | -r | [-s] grubdev osdisk."),
                     N_("Manage the BIOS drive mappings."),
@@ -447,7 +462,9 @@ GRUB_MOD_FINI (map)
   if (!grub_mb_check_bios_int (0x13))
     return;
 #endif
+#ifdef GRUB_MACHINE_PCBIOS
   grub_get_root_biosnumber = grub_get_root_biosnumber_saved;
+#endif
   grub_loader_unregister_preboot_hook (drivemap_hook);
   drivemap_hook = 0;
   grub_unregister_extcmd (cmd);

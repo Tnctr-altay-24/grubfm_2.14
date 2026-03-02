@@ -1223,7 +1223,6 @@ module = {
 
   i386_pc = map/pc/map.c;
   i386_multiboot = map/pc/map.c;
-  i386_pc = map/pc/drivemap_int13h.S;
   i386_multiboot = map/pc/drivemap_int13h.S;
 
   cflags = '-Wno-strict-aliasing -fshort-wchar';
