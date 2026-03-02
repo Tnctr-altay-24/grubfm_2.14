@@ -13,6 +13,7 @@
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
+int grub_vhdxio_probe (grub_file_t io, enum grub_file_type type);
 grub_file_t grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type);
 
 #define VHDX_FILE_ID_OFF              0x00000
@@ -441,6 +442,22 @@ load_bat (grub_file_t io, const struct vhdx_region_entry *bat_r,
   return GRUB_ERR_NONE;
 }
 
+int
+grub_vhdxio_probe (grub_file_t io, enum grub_file_type type)
+{
+  grub_uint8_t sig[8];
+
+  if (!grub_vdisk_filter_should_open (io, type,
+                                      (grub_off_t) (VHDX_REGION_TBL2_OFF
+                                                    + VHDX_HEADER_BLOCK_SIZE)))
+    return 0;
+
+  if (!grub_vdisk_read_exact (io, VHDX_FILE_ID_OFF, sig, sizeof (sig)))
+    return 0;
+
+  return grub_memcmp (sig, VHDX_SIG_FILE, 8) == 0;
+}
+
 grub_file_t
 grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type)
 {
@@ -449,18 +466,10 @@ grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type)
   struct vhdx_region_entry bat = {0, 0};
   struct vhdx_region_entry meta = {0, 0};
   grub_uint8_t hdr[VHDX_HEADER_SIZE];
-  grub_uint8_t sig[8];
   grub_uint32_t param_bits = 0;
 
-  if (!grub_vdisk_filter_should_open (io, type,
-                                      (grub_off_t) (VHDX_REGION_TBL2_OFF
-                                                    + VHDX_HEADER_BLOCK_SIZE)))
-    return io;
-
-  if (!grub_vdisk_read_exact (io, VHDX_FILE_ID_OFF, sig, sizeof (sig)))
-    return io;
-  if (grub_memcmp (sig, VHDX_SIG_FILE, 8) != 0)
-    return io;
+  if (!grub_vhdxio_probe (io, type))
+    return 0;
 
   if (!load_current_header (io, hdr))
     {
@@ -474,16 +483,10 @@ grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type)
       return 0;
     }
 
-  file = grub_zalloc (sizeof (*file));
+  file = grub_vdisk_create (sizeof (*vhdxio),
+                            (struct grub_vdisk **) &vhdxio);
   if (!file)
     return 0;
-
-  vhdxio = grub_zalloc (sizeof (*vhdxio));
-  if (!vhdxio)
-    {
-      grub_free (file);
-      return 0;
-    }
 
   vhdxio->ctx.file = io;
 
@@ -493,47 +496,37 @@ grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type)
                        &vhdxio->ctx.virtual_size,
                        &vhdxio->ctx.logical_sector_size))
     {
-      grub_free (vhdxio);
-      grub_free (file);
       grub_error (GRUB_ERR_BAD_FILE_TYPE, "invalid VHDX metadata");
-      return 0;
+      goto fail;
     }
 
   if (param_bits & VHDX_PARAM_HAS_PARENT)
     {
-      grub_free (vhdxio);
-      grub_free (file);
       grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
                   "VHDX differencing disks are unsupported");
-      return 0;
+      goto fail;
     }
 
   if (vhdxio->ctx.logical_sector_size != 512
       && vhdxio->ctx.logical_sector_size != 4096)
     {
-      grub_free (vhdxio);
-      grub_free (file);
       grub_error (GRUB_ERR_BAD_FILE_TYPE,
                   "unsupported VHDX logical sector size");
-      return 0;
+      goto fail;
     }
 
   if (vhdxio->ctx.block_size == 0
       || vhdxio->ctx.block_size > (256U * 1024U * 1024U)
       || (vhdxio->ctx.block_size & (vhdxio->ctx.block_size - 1)) != 0)
     {
-      grub_free (vhdxio);
-      grub_free (file);
       grub_error (GRUB_ERR_BAD_FILE_TYPE, "invalid VHDX block size");
-      return 0;
+      goto fail;
     }
 
   if (vhdxio->ctx.block_size < vhdxio->ctx.logical_sector_size)
     {
-      grub_free (vhdxio);
-      grub_free (file);
       grub_error (GRUB_ERR_BAD_FILE_TYPE, "invalid VHDX geometry");
-      return 0;
+      goto fail;
     }
 
   vhdxio->ctx.chunk_ratio = (VHDX_MAX_SECTORS_PER_BLOCK
@@ -542,18 +535,12 @@ grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type)
   if (vhdxio->ctx.chunk_ratio == 0
       || (vhdxio->ctx.chunk_ratio & (vhdxio->ctx.chunk_ratio - 1)) != 0)
     {
-      grub_free (vhdxio);
-      grub_free (file);
       grub_error (GRUB_ERR_BAD_FILE_TYPE, "invalid VHDX chunk ratio");
-      return 0;
+      goto fail;
     }
 
   if (load_bat (io, &bat, &vhdxio->ctx) != GRUB_ERR_NONE)
-    {
-      grub_free (vhdxio);
-      grub_free (file);
-      return 0;
-    }
+    goto fail;
 
   grub_dprintf ("vhdxdbg",
                 "vhdx: virtual_size=%llu block_size=%u logical_sector=%u bat_entries=%u\n",
@@ -568,6 +555,10 @@ grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type)
   grub_vdisk_attach_object (file, &vhdxio->disk);
 
   return file;
+
+fail:
+  grub_vdisk_fail (file, vhdxio ? &vhdxio->disk : 0);
+  return 0;
 }
 
 static grub_ssize_t

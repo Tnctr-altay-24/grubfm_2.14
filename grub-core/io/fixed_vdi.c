@@ -24,6 +24,7 @@
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
+int grub_fixed_vdiio_probe (grub_file_t io, enum grub_file_type type);
 grub_file_t grub_fixed_vdiio_open_filter (grub_file_t io, enum grub_file_type type);
 
 #define VDI_IMAGE_FILE_INFO   "<<< Oracle VM VirtualBox Disk Image >>>\n"
@@ -57,42 +58,43 @@ grub_fixed_vdiio_destroy (struct grub_vdisk *disk)
   grub_free (fixed_vdiio);
 }
 
+int
+grub_fixed_vdiio_probe (grub_file_t io, enum grub_file_type type)
+{
+  vdi_preheader_t hdr;
+
+  if (!grub_vdisk_filter_should_open (io, type, VDI_OFFSET + 0x200))
+    return 0;
+
+  if (!grub_vdisk_read_exact (io, 0, &hdr, sizeof (hdr)))
+    return 0;
+
+  return (hdr.u32Signature == VDI_IMAGE_SIGNATURE
+          && grub_strncmp (hdr.szFileInfo, VDI_IMAGE_FILE_INFO,
+                           grub_strlen (VDI_IMAGE_FILE_INFO)) == 0);
+}
+
 grub_file_t
 grub_fixed_vdiio_open_filter (grub_file_t io, enum grub_file_type type)
 {
   grub_file_t file;
   grub_fixed_vdiio_t fixed_vdiio;
-  vdi_preheader_t hdr;
   grub_uint8_t mbr[2];
 
-  if (!grub_vdisk_filter_should_open (io, type, VDI_OFFSET + 0x200))
-    return io;
-
-  grub_memset (&hdr, 0, sizeof (hdr));
-  grub_file_seek (io, 0);
-  grub_file_read (io, &hdr, sizeof (hdr));
-  grub_file_seek (io, 0);
-  if (hdr.u32Signature != VDI_IMAGE_SIGNATURE
-      || grub_strncmp (hdr.szFileInfo, VDI_IMAGE_FILE_INFO,
-                       grub_strlen (VDI_IMAGE_FILE_INFO)) != 0)
-    return io;
+  if (!grub_fixed_vdiio_probe (io, type))
+    return 0;
 
   grub_file_seek (io, VDI_OFFSET + 0x1fe);
   grub_file_read (io, mbr, sizeof (mbr));
   grub_file_seek (io, 0);
   if (mbr[0] != 0x55 || mbr[1] != 0xaa)
-    return io;
+    return 0;
 
-  file = grub_zalloc (sizeof (*file));
+  file = grub_vdisk_create (sizeof (*fixed_vdiio),
+                            (struct grub_vdisk **) &fixed_vdiio);
   if (!file)
     return 0;
 
-  fixed_vdiio = grub_zalloc (sizeof (*fixed_vdiio));
-  if (!fixed_vdiio)
-    {
-      grub_free (file);
-      return 0;
-    }
   fixed_vdiio->file = io;
 
   grub_vdisk_init (&fixed_vdiio->disk, io, io->size - VDI_OFFSET,

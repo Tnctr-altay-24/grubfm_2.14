@@ -216,7 +216,15 @@
 - `qcow2/vhdx/vmdk/fixed_vdi/vhd` 已开始通过 `grub_vdisk_init()` / `grub_vdisk_attach_object()` 接入。
 
 9. 当前剩余结构性工作
-- `vdisk` 各格式尚未完全收敛成单一的 `probe/open/read/virtual_size/logical_sector_size` 描述符对象；目前 `read/size/log_sector_size` 已统一，`probe/open` 仍分散在各格式源文件。
+- `vdisk` 已收敛到统一的 `probe + open + read/virtual_size/logical_sector_size` 分发表：
+  - `vdisk.c` 负责 parser 顺序、probe 命中判断和统一日志
+  - 各格式只保留自己的 probe 细节与对象构造
+- `loopback_file` 已进一步提升为 provider 描述层：
+  - `loopback_file.h` 现在公开 `provider + options + open/close/write_with`
+  - `loopback.c` 的普通 `loopback` 与 `vhd` 入口已共用同一条 backend 驱动路径
+- 仍待继续统一的是：
+  - 更进一步把各格式内部 open 阶段的对象装配再抽成公共 helper
+  - 评估后续是否需要把 `loopback_file` provider 扩展成可注册表化，而不只是默认 raw provider
 - `loopback` 与 `vhd` 虽已边界清晰，但测试体系还需保持按层回归，防止 `fileview` 与 `vdisk` 交叉回归。
 
 ## F. 2026-02-26 增量修复

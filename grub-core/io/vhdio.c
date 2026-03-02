@@ -43,6 +43,7 @@
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
+static int grub_vhdio_probe (grub_file_t io, enum grub_file_type type);
 grub_file_t grub_vhdio_open_filter (grub_file_t io, enum grub_file_type type);
 
 typedef struct
@@ -152,18 +153,22 @@ struct grub_vhdio
 typedef struct grub_vhdio *grub_vhdio_t;
 
 /* Additional virtual-disk parsers integrated into vhd.mod.  */
+int grub_fixed_vdiio_probe (grub_file_t io, enum grub_file_type type);
 grub_file_t grub_fixed_vdiio_open_filter (grub_file_t io, enum grub_file_type type);
+int grub_vhdxio_probe (grub_file_t io, enum grub_file_type type);
 grub_file_t grub_vhdxio_open_filter (grub_file_t io, enum grub_file_type type);
+int grub_vmdkio_probe (grub_file_t io, enum grub_file_type type);
 grub_file_t grub_vmdkio_open_filter (grub_file_t io, enum grub_file_type type);
+int grub_qcow2io_probe (grub_file_t io, enum grub_file_type type);
 grub_file_t grub_qcow2io_open_filter (grub_file_t io, enum grub_file_type type);
 
 static const struct grub_vdisk_parser_desc grub_vdisk_builtin_parsers[] =
   {
-    { GRUB_FILE_FILTER_QCOW2IO, "qcow2", grub_qcow2io_open_filter },
-    { GRUB_FILE_FILTER_VHDXIO, "vhdx", grub_vhdxio_open_filter },
-    { GRUB_FILE_FILTER_VMDKIO, "vmdk", grub_vmdkio_open_filter },
-    { GRUB_FILE_FILTER_FIXED_VDIIO, "fixed_vdi", grub_fixed_vdiio_open_filter },
-    { GRUB_FILE_FILTER_VHDIO, "vhd", grub_vhdio_open_filter }
+    { GRUB_FILE_FILTER_QCOW2IO, "qcow2", grub_qcow2io_probe, grub_qcow2io_open_filter },
+    { GRUB_FILE_FILTER_VHDXIO, "vhdx", grub_vhdxio_probe, grub_vhdxio_open_filter },
+    { GRUB_FILE_FILTER_VMDKIO, "vmdk", grub_vmdkio_probe, grub_vmdkio_open_filter },
+    { GRUB_FILE_FILTER_FIXED_VDIIO, "fixed_vdi", grub_fixed_vdiio_probe, grub_fixed_vdiio_open_filter },
+    { GRUB_FILE_FILTER_VHDIO, "vhd", grub_vhdio_probe, grub_vhdio_open_filter }
   };
 
 static grub_ssize_t
@@ -189,6 +194,24 @@ grub_vhdio_destroy (struct grub_vdisk *disk)
 }
 
 
+static int
+grub_vhdio_probe (grub_file_t io, enum grub_file_type type)
+{
+  VHDFooter footer;
+
+  if (!grub_vdisk_filter_should_open (io, type, 0x10000))
+    return 0;
+
+  grub_memset (&footer, 0, sizeof (footer));
+  if (!grub_vdisk_read_exact (io, 0, &footer, sizeof (footer)))
+    return 0;
+  if (grub_memcmp (footer.cookie, "conectix", 8) != 0)
+    return 0;
+
+  vhd_footer_in (&footer);
+  return footer.diskType == VHD_DISKTYPE_DYNAMIC;
+}
+
 grub_file_t
 grub_vhdio_open_filter (grub_file_t io, enum grub_file_type type)
 {
@@ -198,40 +221,24 @@ grub_vhdio_open_filter (grub_file_t io, enum grub_file_type type)
   VHDDynamicDiskHeader dynaheader;
   VHDFileControl *vhdfc = NULL;
 
-  if (!grub_vdisk_filter_should_open (io, type, 0x10000))
-    return io;
+  if (!grub_vhdio_probe (io, type))
+    return 0;
 
-  /* test header */
   grub_memset (&footer, 0, sizeof(footer));
   grub_memset (&dynaheader, 0, sizeof(dynaheader));
-  grub_file_seek (io, 0);
-  if (grub_file_read (io, &footer, sizeof (footer)) != (grub_ssize_t) sizeof (footer))
-    return io;
-  grub_file_seek (io, 0);
-  if (grub_memcmp (footer.cookie, "conectix", 8) != 0)
-    return io;
-
+  if (!grub_vdisk_read_exact (io, 0, &footer, sizeof (footer)))
+    return 0;
   vhd_footer_in (&footer);
-  if (footer.diskType != VHD_DISKTYPE_DYNAMIC)
-    return io;
   if (footer.dataOffset + sizeof(dynaheader) > io->size)
-    return io;
+    return 0;
 
-  file = (grub_file_t) grub_zalloc (sizeof (*file));
+  file = grub_vdisk_create (sizeof (*vhdio), (struct grub_vdisk **) &vhdio);
   if (!file)
     return 0;
-
-  vhdio = grub_zalloc (sizeof (*vhdio));
-  if (!vhdio)
-  {
-    grub_free (file);
-    return 0;
-  }
   vhdfc = grub_zalloc (sizeof(VHDFileControl));
   if (!vhdfc)
   {
-    grub_free (file);
-    grub_free (vhdio);
+    grub_vdisk_fail (file, &vhdio->disk);
     return 0;
   }
   vhdio->vhdfc = vhdfc;
@@ -292,8 +299,7 @@ grub_vhdio_open_filter (grub_file_t io, enum grub_file_type type)
   return file;
 
 fail:
-  grub_vhdio_destroy (&vhdio->disk);
-  grub_free (file);
+  grub_vdisk_fail (file, &vhdio->disk);
   return 0;
 }
 

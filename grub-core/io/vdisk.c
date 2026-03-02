@@ -17,12 +17,12 @@
  *  along with GRUB.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <grub/err.h>
 #include <grub/file.h>
 #include <grub/misc.h>
 #include <grub/vdisk.h>
 
-static grub_vdisk_parser_t grub_vdisk_parsers[GRUB_FILE_FILTER_MAX];
-static const char *grub_vdisk_parser_names[GRUB_FILE_FILTER_MAX];
+static const struct grub_vdisk_parser_desc *grub_vdisk_parsers[GRUB_FILE_FILTER_MAX];
 static const grub_file_filter_id_t grub_vdisk_parser_order[] =
   {
     GRUB_FILE_FILTER_QCOW2IO,
@@ -76,6 +76,44 @@ grub_vdisk_read_exact (grub_file_t file, grub_off_t off,
     return 0;
 
   return 1;
+}
+
+grub_file_t
+grub_vdisk_create (grub_size_t object_size, struct grub_vdisk **disk_out)
+{
+  grub_file_t file;
+  struct grub_vdisk *disk;
+
+  if (disk_out)
+    *disk_out = 0;
+
+  file = grub_zalloc (sizeof (*file));
+  if (!file)
+    return 0;
+
+  disk = grub_zalloc (object_size);
+  if (!disk)
+    {
+      grub_free (file);
+      return 0;
+    }
+
+  if (disk_out)
+    *disk_out = disk;
+  return file;
+}
+
+void
+grub_vdisk_fail (grub_file_t file, struct grub_vdisk *disk)
+{
+  if (disk)
+    {
+      if (disk->destroy)
+        disk->destroy (disk);
+      else
+        grub_free (disk);
+    }
+  grub_free (file);
 }
 
 void
@@ -139,13 +177,17 @@ grub_vdisk_file_close (grub_file_t file)
 }
 
 void
-grub_vdisk_register_parser (grub_file_filter_id_t id, grub_vdisk_parser_t parser)
+grub_vdisk_register_parser (const struct grub_vdisk_parser_desc *parser)
 {
+  grub_file_filter_id_t id;
+
+  if (!parser)
+    return;
+
+  id = parser->id;
   if (id <= GRUB_FILE_FILTER_ZSTDIO || id >= GRUB_FILE_FILTER_MAX)
     return;
   grub_vdisk_parsers[id] = parser;
-  if (!grub_vdisk_parser_names[id])
-    grub_vdisk_parser_names[id] = "unknown";
 }
 
 void
@@ -154,7 +196,6 @@ grub_vdisk_unregister_parser (grub_file_filter_id_t id)
   if (id <= GRUB_FILE_FILTER_ZSTDIO || id >= GRUB_FILE_FILTER_MAX)
     return;
   grub_vdisk_parsers[id] = 0;
-  grub_vdisk_parser_names[id] = 0;
 }
 
 void
@@ -164,10 +205,7 @@ grub_vdisk_register_parsers (const struct grub_vdisk_parser_desc *parsers,
   grub_size_t i;
 
   for (i = 0; i < count; i++)
-    {
-      grub_vdisk_register_parser (parsers[i].id, parsers[i].parser);
-      grub_vdisk_parser_names[parsers[i].id] = parsers[i].name;
-    }
+    grub_vdisk_register_parser (&parsers[i]);
 }
 
 void
@@ -196,7 +234,7 @@ grub_vdisk_parser_name (grub_file_filter_id_t id)
 {
   if (id <= GRUB_FILE_FILTER_ZSTDIO || id >= GRUB_FILE_FILTER_MAX)
     return 0;
-  return grub_vdisk_parser_names[id];
+  return grub_vdisk_parsers[id] ? grub_vdisk_parsers[id]->name : 0;
 }
 
 grub_file_t
@@ -210,8 +248,8 @@ grub_vdisk_apply_parsers (grub_file_t io, enum grub_file_type type)
 
   for (i = 0; i < ARRAY_SIZE (grub_vdisk_parser_order); i++)
     {
-      grub_vdisk_parser_t parser;
       grub_file_filter_id_t id;
+      const struct grub_vdisk_parser_desc *parser;
 
       id = grub_vdisk_parser_order[i];
       parser = grub_vdisk_parsers[id];
@@ -221,18 +259,32 @@ grub_vdisk_apply_parsers (grub_file_t io, enum grub_file_type type)
       grub_dprintf ("vdiskdbg", "vdisk: try parser=%s file=%p size=%llu\n",
                     grub_vdisk_parser_name (id),
                     io, (unsigned long long) io->size);
-      next = parser (io, type);
+      if (parser->probe && !parser->probe (io, type))
+        {
+          grub_dprintf ("vdiskdbg", "vdisk: parser=%s rejected file=%p\n",
+                        grub_vdisk_parser_name (id), io);
+          continue;
+        }
+
+      grub_dprintf ("vdiskdbg", "vdisk: parser=%s probe matched\n",
+                    grub_vdisk_parser_name (id));
+      next = parser->open ? parser->open (io, type) : 0;
       if (!next)
         return 0;
-      if (next != io)
+      if (next == io)
         {
-          grub_dprintf ("vdiskdbg",
-                        "vdisk: parser=%s accepted size=%llu log_sector=%u\n",
-                        grub_vdisk_parser_name (id),
-                        (unsigned long long) next->size,
-                        next->log_sector_size);
-          return next;
+          grub_error (GRUB_ERR_BAD_FILE_TYPE,
+                      "vdisk parser %s returned raw file after probe",
+                      grub_vdisk_parser_name (id));
+          return 0;
         }
+
+      grub_dprintf ("vdiskdbg",
+                    "vdisk: parser=%s accepted size=%llu log_sector=%u\n",
+                    grub_vdisk_parser_name (id),
+                    (unsigned long long) next->size,
+                    next->log_sector_size);
+      return next;
     }
 
   grub_dprintf ("vdiskdbg", "vdisk: no parser matched file=%p size=%llu\n",

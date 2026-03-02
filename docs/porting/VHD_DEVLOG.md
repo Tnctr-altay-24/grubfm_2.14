@@ -130,6 +130,13 @@ This log tracks implementation status for virtual-disk support behind the unifie
 - `vhd.mod` 已不再依赖通用 `grub_file_filter` 顺序。
 - `vdisk.c` 维护专用 parser 注册表，并支持按描述符批量注册。
 - 当前 parser 表包含：`qcow2`、`vhdx`、`vmdk`、`fixed_vdi`、`vhd`。
+- parser 描述符现已统一为：
+  - `probe(io, type)`：只负责格式识别与最小前置条件判断
+  - `open(io, type)`：只负责构造具体 `struct grub_vdisk` 对象
+- `vdisk.c` 现在统一负责：
+  - parser 顺序调度
+  - reject/match/accept 调试输出
+  - 防止 parser 在 probe 命中后错误返回 raw file
 - 新增 `vdiskdbg` 调试输出：
   - 尝试哪个 parser
   - 哪个 parser 命中
@@ -150,7 +157,8 @@ This log tracks implementation status for virtual-disk support behind the unifie
 - `vdisk`：虚拟磁盘容器 parser
 
 ### 还需继续做的事
-- 统一各格式 parser 的 `probe/open` 入口签名，减少 `vhdio.c` 中的格式特化胶水代码。
+- 继续减少 `vhdio.c` 中仅用于聚合注册的格式特化胶水。
+- `loopback_file` 已推进到默认 raw provider 描述层；后续可再评估是否做成可注册表化。
 - 继续做按层回归：
   - `loopback_file`：raw/img/iso
   - `fileview`：xz/cpio helper archive
@@ -159,4 +167,5 @@ This log tracks implementation status for virtual-disk support behind the unifie
 ### parser 公共 helper
 - 新增 `grub_vdisk_read_exact()`，统一各格式的定点精确读取。
 - 新增 `grub_vdisk_attach()`，统一各格式把 backing file 包装成逻辑磁盘文件的元数据初始化。
+- 新增 `grub_vdisk_create()` / `grub_vdisk_fail()`，统一各格式 open 阶段的 file+object 分配与失败回收。
 - 当前 `vhd/qcow2/vmdk/vhdx/fixed_vdi` 已开始共用该层，后续可继续向统一接口过渡。

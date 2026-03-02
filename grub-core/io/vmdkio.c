@@ -13,6 +13,7 @@
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
+int grub_vmdkio_probe (grub_file_t io, enum grub_file_type type);
 grub_file_t grub_vmdkio_open_filter (grub_file_t io, enum grub_file_type type);
 
 #define VMDK_SPARSE_MAGIC            0x564d444bU /* "KDMV" on disk */
@@ -144,6 +145,22 @@ vmdk_load_gt (struct vmdk_ctx *ctx, grub_uint32_t gt_index)
   return 1;
 }
 
+int
+grub_vmdkio_probe (grub_file_t io, enum grub_file_type type)
+{
+  grub_uint8_t hdr_raw[12];
+
+  if (!grub_vdisk_filter_should_open (io, type, (grub_off_t) 512))
+    return 0;
+
+  if (!grub_vdisk_read_exact (io, 0, hdr_raw, sizeof (hdr_raw)))
+    return 0;
+
+  return (rd_le32 (hdr_raw + 0) == VMDK_SPARSE_MAGIC
+          && rd_le32 (hdr_raw + 4) != 0
+          && rd_le32 (hdr_raw + 8) != 0);
+}
+
 grub_file_t
 grub_vmdkio_open_filter (grub_file_t io, enum grub_file_type type)
 {
@@ -155,14 +172,11 @@ grub_vmdkio_open_filter (grub_file_t io, enum grub_file_type type)
   grub_uint64_t gd_size;
   grub_uint32_t i;
 
-  if (!grub_vdisk_filter_should_open (io, type, (grub_off_t) sizeof (hdr_raw)))
-    return io;
+  if (!grub_vmdkio_probe (io, type))
+    return 0;
 
   if (!grub_vdisk_read_exact (io, 0, hdr_raw, sizeof (hdr_raw)))
-    return io;
-
-  if (rd_le32 (hdr_raw + 0) != VMDK_SPARSE_MAGIC)
-    return io;
+    return 0;
 
   h.magic = rd_le32 (hdr_raw + 0);
   h.version = rd_le32 (hdr_raw + 4);
@@ -215,16 +229,10 @@ grub_vmdkio_open_filter (grub_file_t io, enum grub_file_type type)
       return 0;
     }
 
-  file = grub_zalloc (sizeof (*file));
+  file = grub_vdisk_create (sizeof (*vmdkio),
+                            (struct grub_vdisk **) &vmdkio);
   if (!file)
     return 0;
-
-  vmdkio = grub_zalloc (sizeof (*vmdkio));
-  if (!vmdkio)
-    {
-      grub_free (file);
-      return 0;
-    }
 
   ctx = &vmdkio->ctx;
   ctx->file = io;
@@ -273,13 +281,7 @@ grub_vmdkio_open_filter (grub_file_t io, enum grub_file_type type)
   return file;
 
 fail:
-  if (vmdkio)
-    {
-      grub_free (vmdkio->ctx.gt_cache);
-      grub_free (vmdkio->ctx.gd);
-      grub_free (vmdkio);
-    }
-  grub_free (file);
+  grub_vdisk_fail (file, vmdkio ? &vmdkio->disk : 0);
   return 0;
 }
 

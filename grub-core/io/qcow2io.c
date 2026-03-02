@@ -13,6 +13,7 @@
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
+int grub_qcow2io_probe (grub_file_t io, enum grub_file_type type);
 grub_file_t grub_qcow2io_open_filter (grub_file_t io, enum grub_file_type type);
 
 #define QCOW2_MAGIC                    0x514649fbU
@@ -125,6 +126,24 @@ qcow2_load_l2 (struct qcow2_ctx *ctx, grub_uint64_t l2_off)
   return 1;
 }
 
+int
+grub_qcow2io_probe (grub_file_t io, enum grub_file_type type)
+{
+  grub_uint8_t hraw[8];
+  grub_uint32_t magic;
+  grub_uint32_t version;
+
+  if (!grub_vdisk_filter_should_open (io, type, (grub_off_t) sizeof (hraw)))
+    return 0;
+
+  if (!grub_vdisk_read_exact (io, 0, hraw, sizeof (hraw)))
+    return 0;
+
+  magic = rd_be32 (hraw + 0);
+  version = rd_be32 (hraw + 4);
+  return (magic == QCOW2_MAGIC && version >= 2 && version <= 3);
+}
+
 grub_file_t
 grub_qcow2io_open_filter (grub_file_t io, enum grub_file_type type)
 {
@@ -136,16 +155,13 @@ grub_qcow2io_open_filter (grub_file_t io, enum grub_file_type type)
   grub_uint64_t i;
   grub_size_t l1_bytes;
 
-  if (!grub_vdisk_filter_should_open (io, type, (grub_off_t) sizeof (hraw)))
-    return io;
+  if (!grub_qcow2io_probe (io, type))
+    return 0;
 
   if (!grub_vdisk_read_exact (io, 0, hraw, sizeof (hraw)))
-    return io;
+    return 0;
 
   h.magic = rd_be32 (hraw + 0);
-  if (h.magic != QCOW2_MAGIC)
-    return io;
-
   h.version = rd_be32 (hraw + 4);
   h.backing_file_offset = rd_be64 (hraw + 8);
   h.backing_file_size = rd_be32 (hraw + 16);
@@ -196,16 +212,9 @@ grub_qcow2io_open_filter (grub_file_t io, enum grub_file_type type)
       return 0;
     }
 
-  file = grub_zalloc (sizeof (*file));
+  file = grub_vdisk_create (sizeof (*qc), (struct grub_vdisk **) &qc);
   if (!file)
     return 0;
-
-  qc = grub_zalloc (sizeof (*qc));
-  if (!qc)
-    {
-      grub_free (file);
-      return 0;
-    }
 
   ctx = &qc->ctx;
   ctx->file = io;
@@ -246,13 +255,7 @@ grub_qcow2io_open_filter (grub_file_t io, enum grub_file_type type)
   return file;
 
 fail:
-  if (qc)
-    {
-      grub_free (qc->ctx.l2_cache);
-      grub_free (qc->ctx.l1);
-      grub_free (qc);
-    }
-  grub_free (file);
+  grub_vdisk_fail (file, qc ? &qc->disk : 0);
   return 0;
 }
 

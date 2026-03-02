@@ -7,8 +7,10 @@ struct grub_fs;
 
 struct grub_vdisk;
 
-typedef grub_file_t (*grub_vdisk_parser_t) (grub_file_t io,
-                                            enum grub_file_type type);
+typedef int (*grub_vdisk_probe_t) (grub_file_t io,
+                                   enum grub_file_type type);
+typedef grub_file_t (*grub_vdisk_open_t) (grub_file_t io,
+                                          enum grub_file_type type);
 typedef grub_ssize_t (*grub_vdisk_read_t) (struct grub_vdisk *disk,
                                            grub_off_t off,
                                            char *buf,
@@ -19,7 +21,8 @@ struct grub_vdisk_parser_desc
 {
   grub_file_filter_id_t id;
   const char *name;
-  grub_vdisk_parser_t parser;
+  grub_vdisk_probe_t probe;
+  grub_vdisk_open_t open;
 };
 
 struct grub_vdisk
@@ -39,6 +42,10 @@ int EXPORT_FUNC(grub_vdisk_read_exact) (grub_file_t file,
                                         grub_off_t off,
                                         void *buf,
                                         grub_size_t len);
+grub_file_t EXPORT_FUNC(grub_vdisk_create) (grub_size_t object_size,
+                                            struct grub_vdisk **disk_out);
+void EXPORT_FUNC(grub_vdisk_fail) (grub_file_t file,
+                                   struct grub_vdisk *disk);
 void EXPORT_FUNC(grub_vdisk_attach) (grub_file_t file,
                                      grub_file_t backing,
                                      void *data,
@@ -54,8 +61,7 @@ void EXPORT_FUNC(grub_vdisk_init) (struct grub_vdisk *disk,
                                    const char *name);
 void EXPORT_FUNC(grub_vdisk_attach_object) (grub_file_t file,
                                             struct grub_vdisk *disk);
-void EXPORT_FUNC(grub_vdisk_register_parser) (grub_file_filter_id_t id,
-                                              grub_vdisk_parser_t parser);
+void EXPORT_FUNC(grub_vdisk_register_parser) (const struct grub_vdisk_parser_desc *parser);
 void EXPORT_FUNC(grub_vdisk_unregister_parser) (grub_file_filter_id_t id);
 void EXPORT_FUNC(grub_vdisk_register_parsers) (const struct grub_vdisk_parser_desc *parsers,
                                                grub_size_t count);

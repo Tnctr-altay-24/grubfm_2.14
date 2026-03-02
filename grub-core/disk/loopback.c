@@ -42,6 +42,14 @@ struct grub_loopback
 static struct grub_loopback *loopback_list;
 static unsigned long last_id = 0;
 
+struct grub_loopback_backend
+{
+  const char *name;
+  const struct grub_loopback_file_provider *provider;
+  int (*ready) (void);
+  grub_file_t (*transform) (grub_file_t file, enum grub_file_type type);
+};
+
 static const struct grub_arg_option options[] =
   {
     /* TRANSLATORS: The disk is simply removed from the list of available ones,
@@ -83,46 +91,43 @@ delete_loopback (const char *name)
 }
 
 static grub_err_t
+create_loopback_from_file (const char *devname, grub_file_t file);
+
+static grub_err_t
 create_loopback (const char *devname, const char *filename,
-                 int mem, int bl, enum grub_file_type type)
+                 const struct grub_loopback_backend *backend,
+                 const struct grub_loopback_file_options *file_options,
+                 enum grub_file_type type)
 {
   grub_file_t file;
-  struct grub_loopback *newdev;
-  grub_err_t ret;
+  grub_file_t transformed;
 
-  /* Check that a device with requested name does not already exist. */
-  for (newdev = loopback_list; newdev; newdev = newdev->next)
-    if (grub_strcmp (newdev->devname, devname) == 0)
-      return grub_error (GRUB_ERR_BAD_ARGUMENT, "device name already exists");
+  if (backend && backend->ready && !backend->ready ())
+    return grub_error (GRUB_ERR_UNKNOWN_COMMAND,
+                       N_("no virtual-disk parser module is available; run `insmod vhd'"));
 
-  file = grub_loopback_file_open (filename, mem, bl, type);
+  file = grub_loopback_file_open_with (backend ? backend->provider : 0,
+                                       filename, file_options, type);
   if (! file)
     return grub_errno;
 
-  newdev = grub_malloc (sizeof (struct grub_loopback));
-  if (! newdev)
-    goto fail;
-
-  newdev->devname = grub_strdup (devname);
-  if (! newdev->devname)
+  transformed = backend && backend->transform ? backend->transform (file, type) : file;
+  if (!transformed)
     {
-      grub_free (newdev);
-      goto fail;
+      grub_loopback_file_close_with (backend ? backend->provider : 0, file);
+      return grub_errno;
     }
 
-  newdev->file = file;
-  newdev->id = last_id++;
-  newdev->refcnt = 0;
+  if (transformed == file
+      && backend && backend->transform)
+    {
+      grub_loopback_file_close_with (backend ? backend->provider : 0, file);
+      return grub_error (GRUB_ERR_BAD_FILE_TYPE,
+                         "unsupported %s format",
+                         backend->name ? backend->name : "loopback");
+    }
 
-  newdev->next = loopback_list;
-  loopback_list = newdev;
-
-  return 0;
-
-fail:
-  ret = grub_errno;
-  grub_loopback_file_close (file);
-  return ret;
+  return create_loopback_from_file (devname, transformed);
 }
 
 static grub_err_t
@@ -159,74 +164,71 @@ fail:
   return ret;
 }
 
-/* The command to add and remove loopback devices.  */
+static int
+grub_vhd_backend_ready (void)
+{
+  return grub_vdisk_parsers_ready ();
+}
+
+static grub_file_t
+grub_vhd_backend_transform (grub_file_t file, enum grub_file_type type)
+{
+  return grub_vdisk_apply_parsers (file, type);
+}
+
+static const struct grub_loopback_backend grub_loopback_raw_backend =
+  {
+    .name = "loopback",
+    .provider = 0,
+    .ready = 0,
+    .transform = 0
+  };
+
+static const struct grub_loopback_backend grub_loopback_vhd_backend =
+  {
+    .name = "virtual disk",
+    .provider = 0,
+    .ready = grub_vhd_backend_ready,
+    .transform = grub_vhd_backend_transform
+  };
+
 static grub_err_t
-grub_cmd_loopback (grub_extcmd_context_t ctxt, int argc, char **args)
+grub_cmd_loopback_create (grub_extcmd_context_t ctxt, int argc, char **args,
+                          const struct grub_loopback_backend *backend)
 {
   struct grub_arg_list *state = ctxt->state;
+  struct grub_loopback_file_options file_options;
+
+  file_options.mem = state[1].set;
+  file_options.blocklist = state[2].set;
 
   if (argc < 1)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, "device name required");
 
-  /* Check if `-d' was used.  */
   if (state[0].set)
     return delete_loopback (args[0]);
 
   if (argc < 2)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("filename expected"));
 
+  return create_loopback (args[0], args[1], backend, &file_options,
+                          GRUB_FILE_TYPE_LOOPBACK);
+}
+
+/* The command to add and remove loopback devices.  */
+static grub_err_t
+grub_cmd_loopback (grub_extcmd_context_t ctxt, int argc, char **args)
+{
   /* Keep classic loopback behaviour: allow transparent decompression so
      grubfm rules such as loopback wimboot ${prefix}/wimboot.xz continue
      to work as they did in grub_alive.  */
-  return create_loopback (args[0], args[1], state[1].set, state[2].set,
-                          GRUB_FILE_TYPE_LOOPBACK);
+  return grub_cmd_loopback_create (ctxt, argc, args, &grub_loopback_raw_backend);
 }
 
 static grub_err_t
 grub_cmd_vhd (grub_extcmd_context_t ctxt, int argc, char **args)
 {
-  struct grub_arg_list *state = ctxt->state;
-  int parser_ready = 0;
-
-  parser_ready = grub_vdisk_parsers_ready ();
-
-  if (!parser_ready)
-    return grub_error (GRUB_ERR_UNKNOWN_COMMAND,
-                       N_("no virtual-disk parser module is available; run `insmod vhd'"));
-
-  if (argc < 1)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT, "device name required");
-
-  if (state[0].set)
-    return delete_loopback (args[0]);
-
-  if (argc < 2)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("filename expected"));
-
-  {
-    grub_file_t file;
-    grub_file_t parsed;
-
-    file = grub_loopback_file_open (args[1], state[1].set, state[2].set,
-                                    GRUB_FILE_TYPE_LOOPBACK);
-    if (!file)
-      return grub_errno;
-
-    parsed = grub_vdisk_apply_parsers (file, GRUB_FILE_TYPE_LOOPBACK);
-    if (!parsed)
-      {
-        grub_loopback_file_close (file);
-        return grub_errno;
-      }
-    if (parsed == file)
-      {
-        grub_loopback_file_close (file);
-        return grub_error (GRUB_ERR_BAD_FILE_TYPE,
-                           "unsupported virtual disk format");
-      }
-
-    return create_loopback_from_file (args[0], parsed);
-  }
+  return grub_cmd_loopback_create (ctxt, argc, args, &grub_loopback_vhd_backend);
 }
 
 
