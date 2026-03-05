@@ -285,5 +285,6 @@ widthspec.bin
 
 /po
 /.cache
-/build
+/build*
+!build-all-targets.sh
 compile_commands.json
