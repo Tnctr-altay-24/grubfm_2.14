@@ -32,9 +32,8 @@ EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <grub/efi/graphics_output.h>
 
 #include <stdio.h>
-#include <stdlib.h>
 
-#include "lodepng.h" //PNG encoding library
+#include "lodepng.h" // PNG encoding library
 #include "AppleEventMin.h" // Mac-specific keyboard input
 
 GRUB_MOD_LICENSE ("GPLv3+");
@@ -51,6 +50,31 @@ static grub_efi_boot_services_t *b;
 static grub_efi_runtime_services_t *r;
 
 static CHAR16 utf16_fat_file_name[13];
+
+#define CRS_LOG(fmt, ...) grub_printf ("crscreenshot: " fmt "\n", ##__VA_ARGS__)
+
+static void
+refresh_services (void)
+{
+  if (grub_efi_system_table)
+    {
+      b = grub_efi_system_table->boot_services;
+      r = grub_efi_system_table->runtime_services;
+    }
+}
+
+typedef EFI_STATUS (EFIAPI *crs_open_volume_t) (EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *this,
+                                                 EFI_FILE_PROTOCOL **root);
+typedef EFI_STATUS (EFIAPI *crs_file_open_t) (EFI_FILE_PROTOCOL *this,
+                                              EFI_FILE_PROTOCOL **new_handle,
+                                              CHAR16 *file_name,
+                                              UINT64 open_mode,
+                                              UINT64 attributes);
+typedef EFI_STATUS (EFIAPI *crs_file_write_t) (EFI_FILE_PROTOCOL *this,
+                                               UINTN *buffer_size,
+                                               VOID *buffer);
+typedef EFI_STATUS (EFIAPI *crs_file_close_t) (EFI_FILE_PROTOCOL *this);
+typedef EFI_STATUS (EFIAPI *crs_file_delete_t) (EFI_FILE_PROTOCOL *this);
 
 static void
 utf8_to_utf16 (const char *str)
@@ -72,11 +96,24 @@ FindWritableFs (EFI_FILE_PROTOCOL **WritableFs)
     UINTN      HandleCount;
     UINTN      i;
 
+    refresh_services ();
+    if (!b)
+      {
+        CRS_LOG ("FindWritableFs: boot services unavailable");
+        return GRUB_EFI_UNSUPPORTED;
+      }
+    CRS_LOG ("FindWritableFs: begin");
+    CRS_LOG ("FindWritableFs: b=0x%lx locate_handle_buffer=0x%lx",
+             (unsigned long) (grub_addr_t) b,
+             (unsigned long) (grub_addr_t) b->locate_handle_buffer);
     // Locate all the simple file system devices in the system
+    CRS_LOG ("FindWritableFs: locate_handle_buffer(SimpleFileSystem)");
     EFI_STATUS Status = efi_call_5 (b->locate_handle_buffer,
                                     GRUB_EFI_BY_PROTOCOL,
                                     &gEfiSimpleFileSystemProtocolGuid, NULL,
                                     &HandleCount, &HandleBuffer);
+    CRS_LOG ("FindWritableFs: locate_handle_buffer status=0x%lx handles=%lu",
+             (unsigned long) Status, (unsigned long) HandleCount);
     if (!EFI_ERROR (Status)) {
         EFI_FILE_PROTOCOL *Fs = NULL;
         // For each located volume
@@ -96,7 +133,10 @@ FindWritableFs (EFI_FILE_PROTOCOL **WritableFs)
             }
 
             // Open the volume
-            Status = efi_call_2 (SimpleFs->open_volume, SimpleFs, &Fs);
+            CRS_LOG ("FindWritableFs: handle[%lu] open_volume ptr=0x%lx",
+                     (unsigned long) i,
+                     (unsigned long) (grub_addr_t) SimpleFs->open_volume);
+            Status = ((crs_open_volume_t) SimpleFs->open_volume) (SimpleFs, &Fs);
             if (EFI_ERROR (Status)) {
                 grub_dprintf ("crscreenshot",
                           "FindWritableFs: SimpleFs->OpenVolume returned err\n");
@@ -105,11 +145,11 @@ FindWritableFs (EFI_FILE_PROTOCOL **WritableFs)
 
             // Try opening a file for writing
             utf8_to_utf16 ("crsdtest.fil");
-            Status = efi_call_5 (Fs->file_open,
-                                 Fs, &File, utf16_fat_file_name,
-                                 GRUB_EFI_FILE_MODE_CREATE |
-                                 GRUB_EFI_FILE_MODE_READ |
-                                 GRUB_EFI_FILE_MODE_WRITE, 0);
+            Status = ((crs_file_open_t) Fs->file_open)
+              (Fs, &File, utf16_fat_file_name,
+               GRUB_EFI_FILE_MODE_CREATE |
+               GRUB_EFI_FILE_MODE_READ |
+               GRUB_EFI_FILE_MODE_WRITE, 0);
             if (EFI_ERROR (Status)) {
                 grub_dprintf ("crscreenshot",
                               "FindWritableFs: Fs->Open returned err\n");
@@ -117,7 +157,7 @@ FindWritableFs (EFI_FILE_PROTOCOL **WritableFs)
             }
 
             // Writable FS found
-            efi_call_1 (Fs->file_delete, File);
+            ((crs_file_delete_t) Fs->file_delete) (File);
             *WritableFs = Fs;
             Status = GRUB_EFI_SUCCESS;
             break;
@@ -198,6 +238,85 @@ ShowStatus (UINT8 Red, UINT8 Green, UINT8 Blue)
     return GRUB_EFI_SUCCESS;
 }
 
+static void
+put_u16le (UINT8 *buf, UINTN off, UINT16 val)
+{
+  buf[off] = (UINT8) (val & 0xFF);
+  buf[off + 1] = (UINT8) ((val >> 8) & 0xFF);
+}
+
+static void
+put_u32le (UINT8 *buf, UINTN off, UINT32 val)
+{
+  buf[off] = (UINT8) (val & 0xFF);
+  buf[off + 1] = (UINT8) ((val >> 8) & 0xFF);
+  buf[off + 2] = (UINT8) ((val >> 16) & 0xFF);
+  buf[off + 3] = (UINT8) ((val >> 24) & 0xFF);
+}
+
+static EFI_STATUS
+WriteBmpFile (EFI_FILE_PROTOCOL *File, EFI_GRAPHICS_OUTPUT_BLT_PIXEL *Image,
+              UINT32 ScreenWidth, UINT32 ScreenHeight)
+{
+  UINTN RowSize = (((UINTN) ScreenWidth * 3) + 3) & ~((UINTN) 3);
+  UINTN DataSize = RowSize * (UINTN) ScreenHeight;
+  UINTN FileSize = 54 + DataSize;
+  UINT8 Header[54];
+  UINT8 *RowBuffer = NULL;
+  UINTN x, y, WriteSize;
+  EFI_STATUS Status;
+  CRS_LOG ("WriteBmpFile: begin %ux%u", ScreenWidth, ScreenHeight);
+
+  if (DataSize > 0xFFFFFFFFU || FileSize > 0xFFFFFFFFU)
+    return GRUB_EFI_UNSUPPORTED;
+
+  grub_memset (Header, 0, sizeof (Header));
+  Header[0] = 'B';
+  Header[1] = 'M';
+  put_u32le (Header, 2, (UINT32) FileSize);
+  put_u32le (Header, 10, 54);
+  put_u32le (Header, 14, 40);
+  put_u32le (Header, 18, ScreenWidth);
+  put_u32le (Header, 22, ScreenHeight);
+  put_u16le (Header, 26, 1);
+  put_u16le (Header, 28, 24);
+  put_u32le (Header, 34, (UINT32) DataSize);
+
+  WriteSize = sizeof (Header);
+  Status = ((crs_file_write_t) File->file_write) (File, &WriteSize, Header);
+  if (EFI_ERROR (Status))
+    return Status;
+
+  Status = efi_call_3 (b->allocate_pool, GRUB_EFI_BOOT_SERVICES_DATA,
+                       RowSize, (VOID **) &RowBuffer);
+  if (EFI_ERROR (Status))
+    return Status;
+
+  Status = GRUB_EFI_SUCCESS;
+  for (y = ScreenHeight; y > 0; y--)
+    {
+      grub_memset (RowBuffer, 0, RowSize);
+      for (x = 0; x < ScreenWidth; x++)
+        {
+          EFI_GRAPHICS_OUTPUT_BLT_PIXEL *Pixel;
+          UINTN base = x * 3;
+          Pixel = &Image[((UINTN) (y - 1) * ScreenWidth) + x];
+          RowBuffer[base] = Pixel->blue;
+          RowBuffer[base + 1] = Pixel->green;
+          RowBuffer[base + 2] = Pixel->red;
+        }
+
+      WriteSize = RowSize;
+      Status = ((crs_file_write_t) File->file_write) (File, &WriteSize, RowBuffer);
+      if (EFI_ERROR (Status))
+        break;
+    }
+
+  efi_call_1 (b->free_pool, RowBuffer);
+  CRS_LOG ("WriteBmpFile: done status=0x%lx", (unsigned long) Status);
+  return Status;
+}
+
 
 static EFI_STATUS EFIAPI
 TakeScreenshot (EFI_KEY_DATA *KeyData)
@@ -208,7 +327,7 @@ TakeScreenshot (EFI_KEY_DATA *KeyData)
     EFI_GRAPHICS_OUTPUT_BLT_PIXEL *Image = NULL;
     UINTN      ImageSize;         // Size in pixels
     UINT8      *PngFile = NULL;
-    UINTN      PngFileSize;       // Size in bytes
+    UINTN      PngFileSize = 0;
     EFI_STATUS Status;
     UINTN      HandleCount;
     EFI_HANDLE *HandleBuffer = NULL;
@@ -217,22 +336,31 @@ TakeScreenshot (EFI_KEY_DATA *KeyData)
     EFI_TIME   Time;
     UINTN      i, j;
     (VOID)KeyData;
+    refresh_services ();
+    CRS_LOG ("TakeScreenshot: b=0x%lx r=0x%lx",
+             (unsigned long) (grub_addr_t) b,
+             (unsigned long) (grub_addr_t) r);
+    CRS_LOG ("hotkey captured, taking screenshot");
 
     // Find writable FS
+    CRS_LOG ("TakeScreenshot: calling FindWritableFs");
     Status = FindWritableFs(&Fs);
     if (EFI_ERROR (Status)) {
         grub_dprintf ("crscreenshot", "TakeScreenshot: Can't find writable FS\n");
+        CRS_LOG ("failed to find writable FS");
         ShowStatus(0xFF, 0xFF, 0x00); //Yellow
         return GRUB_EFI_SUCCESS;
     }
 
     // Locate all instances of GOP
+    CRS_LOG ("TakeScreenshot: locate_handle_buffer(GOP)");
     Status = efi_call_5 (b->locate_handle_buffer, GRUB_EFI_BY_PROTOCOL,
                          &gEfiGraphicsOutputProtocolGuid,
                          NULL, &HandleCount, &HandleBuffer);
     if (EFI_ERROR (Status)) {
         grub_dprintf ("crscreenshot",
                       "ShowStatus: Graphics output protocol not found\n");
+        CRS_LOG ("failed to locate GOP handles");
         return GRUB_EFI_SUCCESS;
     }
 
@@ -267,6 +395,8 @@ TakeScreenshot (EFI_KEY_DATA *KeyData)
                 // Set file name to scrnshot.png
               utf8_to_utf16 ("scrnshot.png");
             }
+            CRS_LOG ("capturing GOP[%lu], %ux%u", (unsigned long) i,
+                     ScreenWidth, ScreenHeight);
 
             // Allocate memory for screenshot
             Status = efi_call_3 (b->allocate_pool,
@@ -276,6 +406,7 @@ TakeScreenshot (EFI_KEY_DATA *KeyData)
             if (EFI_ERROR(Status)) {
                 grub_dprintf ("crscreenshot",
                               "TakeScreenshot: gBS->AllocatePool returned err\n");
+                CRS_LOG ("failed to allocate image buffer");
                 break;
             }
 
@@ -286,6 +417,7 @@ TakeScreenshot (EFI_KEY_DATA *KeyData)
             if (EFI_ERROR(Status)) {
                 grub_dprintf ("crscreenshot",
                           "TakeScreenshot: GraphicsOutput->Blt returned err\n");
+                CRS_LOG ("GOP blit failed");
                 break;
             }
 
@@ -298,22 +430,25 @@ TakeScreenshot (EFI_KEY_DATA *KeyData)
             }
             if (j == ImageSize) {
                 grub_dprintf ("crscreenshot", "TakeScreenshot: GraphicsOutput->Blt returned pitch black image, skipped\n");
+                CRS_LOG ("gop[%lu] produced a black frame, skipped", (unsigned long) i);
                 ShowStatus(0x00, 0x00, 0xFF); //Blue
                 break;
             }
 
             // Open or create output file
-            Status = efi_call_5 (Fs->file_open, Fs, &File, utf16_fat_file_name,
-                                 GRUB_EFI_FILE_MODE_CREATE |
-                                 GRUB_EFI_FILE_MODE_READ |
-                                 GRUB_EFI_FILE_MODE_WRITE, 0);
+            Status = ((crs_file_open_t) Fs->file_open)
+              (Fs, &File, utf16_fat_file_name,
+               GRUB_EFI_FILE_MODE_CREATE |
+               GRUB_EFI_FILE_MODE_READ |
+               GRUB_EFI_FILE_MODE_WRITE, 0);
             if (EFI_ERROR (Status)) {
                 grub_dprintf ("crscreenshot",
                       "TakeScreenshot: Fs->Open returned err\n");
+                CRS_LOG ("failed to open output file");
                 break;
             }
 
-            // Convert BGR to RGBA with Alpha set to 0xFF
+            // Convert BGR to RGBA with Alpha set to 0xFF for lodepng.
             for (j = 0; j < ImageSize; j++) {
                 UINT8 Temp = Image[j].blue;
                 Image[j].blue = Image[j].red;
@@ -321,24 +456,34 @@ TakeScreenshot (EFI_KEY_DATA *KeyData)
                 Image[j].reserved = 0xFF;
             }
 
-            // Encode raw RGB image to PNG format
-            j = lodepng_encode32(&PngFile, &PngFileSize, (const UINT8*)Image, ScreenWidth, ScreenHeight);
-            if (j) {
-                grub_dprintf ("crscreenshot",
-                              "TakeScreenshot: lodepng_encode32 returned err\n");
-                break;
+            // Primary path: encode and write PNG.
+            j = lodepng_encode32 (&PngFile, &PngFileSize,
+                                  (const UINT8 *) Image,
+                                  ScreenWidth, ScreenHeight);
+            if (!j) {
+                Status = ((crs_file_write_t) File->file_write) (File, &PngFileSize, PngFile);
+                if (EFI_ERROR(Status)) {
+                    grub_dprintf ("crscreenshot",
+                                  "TakeScreenshot: File->Write returned err\n");
+                    CRS_LOG ("file write failed");
+                    break;
+                }
+            } else {
+                CRS_LOG ("lodepng_encode32 failed (%lu), fallback to BMP", (unsigned long) j);
+                Status = WriteBmpFile (File, Image, ScreenWidth, ScreenHeight);
+                if (EFI_ERROR(Status)) {
+                    grub_dprintf ("crscreenshot",
+                                  "TakeScreenshot: File->Write returned err\n");
+                    CRS_LOG ("bmp fallback write failed");
+                    break;
+                }
             }
 
-            // Write PNG image into the file and close it
-            Status = efi_call_3(File->file_write, File, &PngFileSize, PngFile);
-            efi_call_1 (File->file_close, File);
-            if (EFI_ERROR(Status)) {
-                grub_dprintf ("crscreenshot",
-                              "TakeScreenshot: File->Write returned err\n");
-                break;
-            }
+            ((crs_file_close_t) File->file_close) (File);
+            File = NULL;
 
             // Show success
+            CRS_LOG ("screenshot saved");
             ShowStatus(0x00, 0xFF, 0x00); //Green
         } while(0);
 
@@ -346,10 +491,17 @@ TakeScreenshot (EFI_KEY_DATA *KeyData)
         if (Image)
             efi_call_1 (b->free_pool, Image);
         if (PngFile)
-            free(PngFile);
+            grub_free (PngFile);
+        if (File)
+            ((crs_file_close_t) File->file_close) (File);
         Image = NULL;
         PngFile = NULL;
+        PngFileSize = 0;
+        File = NULL;
     }
+
+    if (HandleBuffer)
+        efi_call_1 (b->free_pool, HandleBuffer);
 
     // Show error
     if (EFI_ERROR(Status))
@@ -374,6 +526,7 @@ AppleEventKeyHandler (APPLE_EVENT_INFORMATION *Information, VOID *NotifyContext)
         Information->Modifiers == (APPLE_MODIFIER_LEFT_CONTROL|
                                    APPLE_MODIFIER_LEFT_OPTION)) {
         // Take a screenshot
+        CRS_LOG ("AppleEvent hotkey matched");
         TakeScreenshot (NULL);
     }
 }
