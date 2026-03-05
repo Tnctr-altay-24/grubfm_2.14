@@ -38,7 +38,7 @@
  * stack size of 128 KiB. So, assuming at most 1-2 KiB per iteration this should
  * keep us safe.
  */
-#define MAX_RECURSION_DEPTH 64
+#define MAX_RECURSION_DEPTH 256
 
 static unsigned long is_continue;
 static unsigned long active_loops;
@@ -829,11 +829,10 @@ grub_script_execute_cmd (struct grub_script_cmd *cmd)
   if (cmd == 0)
     return 0;
 
-  recursion_depth++;
-
   if (recursion_depth >= MAX_RECURSION_DEPTH)
     return grub_error (GRUB_ERR_RECURSION_DEPTH, N_("maximum recursion depth exceeded"));
 
+  recursion_depth++;
   ret = cmd->exec (cmd);
   recursion_depth--;
 

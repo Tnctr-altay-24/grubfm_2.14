@@ -52,6 +52,7 @@ grub_chainloader_unload (void *context)
   grub_efi_handle_t image_handle = (grub_efi_handle_t) context;
   grub_efi_loaded_image_t *loaded_image;
 
+  grub_dprintf ("chain", "chainloader unload image_handle=%p\n", image_handle);
   loaded_image = grub_efi_get_loaded_image (image_handle);
   if (loaded_image != NULL)
     grub_free (loaded_image->load_options);
@@ -72,7 +73,10 @@ grub_chainloader_boot (void *context)
   grub_efi_char16_t *exit_data = NULL;
 
   b = grub_efi_system_table->boot_services;
+  grub_dprintf ("chain", "StartImage image_handle=%p\n", image_handle);
   status = grub_efi_start_image (image_handle, &exit_data_size, &exit_data);
+  grub_dprintf ("chain", "StartImage status=0x%lx exit_data_size=%lu\n",
+		(unsigned long) status, (unsigned long) exit_data_size);
   if (status != GRUB_EFI_SUCCESS)
     {
       if (exit_data)
@@ -229,6 +233,7 @@ grub_cmd_chainloader (grub_command_t cmd __attribute__ ((unused)),
   if (argc == 0)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("filename expected"));
   filename = argv[0];
+  grub_dprintf ("chain", "chainloader argc=%d filename=%s\n", argc, filename);
 
   grub_dl_ref (my_mod);
 
@@ -264,12 +269,14 @@ grub_cmd_chainloader (grub_command_t cmd __attribute__ ((unused)),
 
   if (dev_handle)
     dp = grub_efi_get_device_path (dev_handle);
+  grub_dprintf ("chain", "device_handle=%p device_path=%p\n", dev_handle, dp);
 
   if (dp != NULL)
     {
       file_path = make_file_path (dp, filename);
       if (file_path == NULL)
 	goto fail;
+      grub_dprintf ("chain", "built file_path=%p for %s\n", file_path, filename);
     }
 
   size = grub_file_size (file);
@@ -280,6 +287,8 @@ grub_cmd_chainloader (grub_command_t cmd __attribute__ ((unused)),
       goto fail;
     }
   pages = (grub_efi_uintn_t) GRUB_EFI_BYTES_TO_PAGES (size);
+  grub_dprintf ("chain", "file_size=%ld pages=%lu\n", (long) size,
+		(unsigned long) pages);
 
   status = b->allocate_pages (GRUB_EFI_ALLOCATE_ANY_PAGES,
 			      GRUB_EFI_LOADER_CODE,
@@ -293,6 +302,7 @@ grub_cmd_chainloader (grub_command_t cmd __attribute__ ((unused)),
     }
 
   boot_image = (void *) ((grub_addr_t) address);
+  grub_dprintf ("chain", "allocated boot_image=%p\n", boot_image);
   if (grub_file_read (file, boot_image, size) != size)
     {
       if (grub_errno == GRUB_ERR_NONE)
@@ -334,15 +344,25 @@ grub_cmd_chainloader (grub_command_t cmd __attribute__ ((unused)),
 	    }
 	  boot_image = (char *) boot_image + grub_cpu_to_le32 (archs[i].offset);
 	  size = grub_cpu_to_le32 (archs[i].size);
+	  grub_dprintf ("chain", "selected Mach-O arch=%lu offset=%lu size=%ld\n",
+			(unsigned long) i,
+			(unsigned long) grub_cpu_to_le32 (archs[i].offset),
+			(long) size);
 	}
     }
 #endif
 
   image_handle = grub_efi_get_last_verified_image_handle ();
+  if (image_handle != NULL)
+    grub_dprintf ("chain", "using verified image_handle=%p\n", image_handle);
   if (image_handle == NULL)
     {
+      grub_dprintf ("chain", "LoadImage from memory file_path=%p size=%ld\n",
+		    file_path, (long) size);
       status = grub_efi_load_image (0, grub_efi_image_handle, file_path,
 				boot_image, size, &image_handle);
+      grub_dprintf ("chain", "LoadImage status=0x%lx image_handle=%p\n",
+		    (unsigned long) status, image_handle);
       if (status != GRUB_EFI_SUCCESS)
 	{
 	  if (status == GRUB_EFI_OUT_OF_RESOURCES)
@@ -364,6 +384,8 @@ grub_cmd_chainloader (grub_command_t cmd __attribute__ ((unused)),
       goto fail;
     }
   loaded_image->device_handle = dev_handle;
+  grub_dprintf ("chain", "loaded_image=%p device_handle=%p\n",
+		loaded_image, dev_handle);
 
   /* Build load options with arguments from chainloader command line. */
   if (argc > 1)
@@ -393,6 +415,7 @@ grub_cmd_chainloader (grub_command_t cmd __attribute__ ((unused)),
 
       loaded_image->load_options = cmdline;
       loaded_image->load_options_size = len;
+      grub_dprintf ("chain", "load_options_size=%lu\n", (unsigned long) len);
     }
 
   grub_file_close (file);
@@ -403,9 +426,13 @@ grub_cmd_chainloader (grub_command_t cmd __attribute__ ((unused)),
   grub_free (file_path);
 
   grub_loader_set_ex (grub_chainloader_boot, grub_chainloader_unload, image_handle, 0);
+  grub_dprintf ("chain", "chainloader setup complete image_handle=%p\n",
+		image_handle);
   return 0;
 
  fail:
+  grub_dprintf ("chain", "chainloader failed filename=%s grub_errno=%d\n",
+		filename ? filename : "(null)", grub_errno);
 
   if (dev)
     grub_device_close (dev);
