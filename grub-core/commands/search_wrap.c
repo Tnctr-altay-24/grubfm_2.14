@@ -40,6 +40,7 @@ static const struct grub_arg_option options[] =
      N_("Set a variable to the first device found."), N_("VARNAME"),
      ARG_TYPE_STRING},
     {"no-floppy",	'n', 0, N_("Do not probe any floppy drive."), 0, 0},
+    {"quiet",		'q', 0, N_("Don't print error if no match."), 0, 0},
     {"efidisk-only",	0, 0, N_("Only probe EFI disks."), 0, 0},
     {"cryptodisk-only",	0, 0, N_("Only probe encrypted disks."), 0, 0},
     {"hint",	        'h', GRUB_ARG_OPTION_REPEATABLE,
@@ -75,6 +76,7 @@ enum options
     SEARCH_FS_UUID,
     SEARCH_SET,
     SEARCH_NO_FLOPPY,
+    SEARCH_QUIET,
     SEARCH_EFIDISK_ONLY,
     SEARCH_CRYPTODISK_ONLY,
     SEARCH_HINT,
@@ -188,6 +190,9 @@ grub_cmd_search (grub_extcmd_context_t ctxt, int argc, char **args)
   if (state[SEARCH_NO_FLOPPY].set)
     flags |= SEARCH_FLAGS_NO_FLOPPY;
 
+  if (state[SEARCH_QUIET].set)
+    flags |= SEARCH_FLAGS_QUIET;
+
   if (state[SEARCH_EFIDISK_ONLY].set)
     flags |= SEARCH_FLAGS_EFIDISK_ONLY;
 
@@ -215,7 +220,7 @@ GRUB_MOD_INIT(search)
   cmd =
     grub_register_extcmd ("search", grub_cmd_search,
 			  GRUB_COMMAND_FLAG_EXTRACTOR | GRUB_COMMAND_ACCEPT_DASH,
-			  N_("[-f|-l|-u|-s|-n] [--cryptodisk-only] [--hint HINT [--hint HINT] ...]"
+			  N_("[-f|-l|-u|-s|-n|-q] [--cryptodisk-only] [--hint HINT [--hint HINT] ...]"
 			     " NAME"),
 			  N_("Search devices by file, filesystem label"
 			     " or filesystem UUID."

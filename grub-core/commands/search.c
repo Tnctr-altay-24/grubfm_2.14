@@ -368,7 +368,12 @@ FUNC_NAME (const char *key, const char *var, enum search_flags flags,
     try (&ctx);
 
   if (grub_errno == GRUB_ERR_NONE && ctx.count == 0)
-    grub_error (GRUB_ERR_FILE_NOT_FOUND, "no such device: %s", key);
+    {
+      if (!(flags & SEARCH_FLAGS_QUIET))
+	grub_error (GRUB_ERR_FILE_NOT_FOUND, "no such device: %s", key);
+      else
+	grub_errno = GRUB_ERR_FILE_NOT_FOUND;
+    }
 }
 
 static grub_err_t
