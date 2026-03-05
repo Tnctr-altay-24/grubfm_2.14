@@ -774,6 +774,7 @@ grub_update_mem_attrs (grub_addr_t addr, grub_size_t size,
   static grub_guid_t protocol_guid = GRUB_EFI_MEMORY_ATTRIBUTE_PROTOCOL_GUID;
   grub_efi_status_t efi_status = GRUB_EFI_SUCCESS;
   grub_efi_uint64_t uefi_set_attrs, uefi_clear_attrs;
+  static int warned;
 
   if (physaddr & (GRUB_EFI_PAGE_SIZE - 1) || size & (GRUB_EFI_PAGE_SIZE - 1) || size == 0)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, "%s() called with invalid arguments", __FUNCTION__);
@@ -791,7 +792,25 @@ grub_update_mem_attrs (grub_addr_t addr, grub_size_t size,
     efi_status = proto->clear_memory_attributes (proto, physaddr, size, uefi_clear_attrs);
 
   if (efi_status != GRUB_EFI_SUCCESS)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT, "%s() called with invalid arguments", __FUNCTION__);
+    {
+      if (!warned)
+	{
+	  grub_printf ("warning: UEFI memory attribute updates are unsupported on this firmware; "
+		       "skipping NX/RO module protections.\n");
+	  warned = 1;
+	}
+
+      grub_dprintf ("nx", "%s() status=0x%lx on 0x%" PRIxGRUB_ADDR "-0x%" PRIxGRUB_ADDR
+		    " (set=%c%c%c clear=%c%c%c), ignored\n",
+		    __FUNCTION__, (unsigned long) efi_status, addr, addr + size - 1,
+		    (set_attrs & GRUB_MEM_ATTR_R) ? 'r' : '-',
+		    (set_attrs & GRUB_MEM_ATTR_W) ? 'w' : '-',
+		    (set_attrs & GRUB_MEM_ATTR_X) ? 'x' : '-',
+		    (clear_attrs & GRUB_MEM_ATTR_R) ? 'r' : '-',
+		    (clear_attrs & GRUB_MEM_ATTR_W) ? 'w' : '-',
+		    (clear_attrs & GRUB_MEM_ATTR_X) ? 'x' : '-');
+      return GRUB_ERR_NONE;
+    }
 
   grub_dprintf ("nx", "set +%s%s%s -%s%s%s on 0x%" PRIxGRUB_ADDR "-0x%" PRIxGRUB_ADDR "\n",
 		(set_attrs & GRUB_MEM_ATTR_R) ? "r" : "",
