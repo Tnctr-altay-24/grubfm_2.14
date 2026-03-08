@@ -25,6 +25,8 @@ static grub_extcmd_t cmd_vtwindows;
 static grub_extcmd_t cmd_vtwimboot;
 static void *grub_ventoy_windows_last_chain_buf;
 static grub_size_t grub_ventoy_windows_last_chain_size;
+static void *grub_ventoy_windows_last_rtdata_buf;
+static grub_size_t grub_ventoy_windows_last_rtdata_size;
 
 enum options_vtwindows
 {
@@ -50,22 +52,78 @@ static const struct grub_arg_option options_vtwindows[] =
      N_("iso9660|udf"), ARG_TYPE_STRING},
     {"wim", 'w', 0, N_("Path to boot.wim inside the mounted image."),
      N_("PATH"), ARG_TYPE_STRING},
-    {"efi", 'e', 0, N_("Optional path to bootmgfw.efi inside the mounted image."),
+    {"efi", 'e', 0, N_("Path to the EFI boot manager inside the mounted image."),
      N_("PATH"), ARG_TYPE_STRING},
-    {"sdi", 's', 0, N_("Optional path to boot.sdi inside the mounted image."),
+    {"sdi", 's', 0, N_("Path to boot.sdi inside the mounted image."),
      N_("PATH"), ARG_TYPE_STRING},
-    {"inject", 'j', 0, N_("Optional inject directory for wimboot."),
+    {"inject", 'j', 0, N_("Optional injection archive or directory."),
      N_("PATH"), ARG_TYPE_STRING},
     {"index", 'i', 0, N_("Use WIM image index n."),
      N_("n"), ARG_TYPE_INT},
-    {"gui", 'g', 0, N_("Display graphical boot messages."), 0, 0},
-    {"rawbcd", 'b', 0, N_("Disable rewriting .exe to .efi in the BCD file."), 0, 0},
-    {"rawwim", 'r', 0, N_("Disable patching the wim file."), 0, 0},
-    {"pause", 'p', 0, N_("Show info and wait for keypress."), 0, 0},
+    {"gui", 'g', 0, N_("Record graphical boot preference."), 0, 0},
+    {"rawbcd", 'b', 0, N_("Record raw BCD preference."), 0, 0},
+    {"rawwim", 'r', 0, N_("Record raw WIM preference."), 0, 0},
+    {"pause", 'p', 0, N_("Record pause preference."), 0, 0},
     {"script", 0, 0, N_("Execute a GRUB script after exporting variables."),
      N_("COMMANDS"), ARG_TYPE_STRING},
     {0, 0, 0, 0, 0, 0}
   };
+
+static void
+grub_ventoy_windows_debug_string (const char *scope, const char *name,
+                                  const char *value)
+{
+  grub_printf ("ventoydbg:%s %s=\"%s\"\n",
+               scope ? scope : "(null)",
+               name ? name : "(null)",
+               value ? value : "(null)");
+  grub_dprintf ("ventoydbg", "%s %s=\"%s\"\n",
+                scope ? scope : "(null)",
+                name ? name : "(null)",
+                value ? value : "(null)");
+}
+
+static void
+grub_ventoy_windows_debug_u64 (const char *scope, const char *name,
+                               grub_uint64_t value)
+{
+  grub_printf ("ventoydbg:%s %s=%llu\n",
+               scope ? scope : "(null)",
+               name ? name : "(null)",
+               (unsigned long long) value);
+  grub_dprintf ("ventoydbg", "%s %s=%llu\n",
+                scope ? scope : "(null)",
+                name ? name : "(null)",
+                (unsigned long long) value);
+}
+
+static void
+grub_ventoy_windows_debug_script (const char *scope, const char *script)
+{
+  grub_ventoy_windows_debug_string (scope, "script", script);
+  if (script)
+    grub_printf ("ventoydbg:%s script-begin\n%s\nventoydbg:%s script-end\n",
+                 scope ? scope : "(null)", script, scope ? scope : "(null)");
+}
+
+static grub_err_t
+grub_ventoy_windows_exec_script (const char *scope, const char *script)
+{
+  grub_err_t err;
+  char *copy;
+
+  if (!script || !*script)
+    return GRUB_ERR_NONE;
+
+  grub_ventoy_windows_debug_script (scope, script);
+  copy = grub_strdup (script);
+  if (!copy)
+    return grub_errno;
+
+  err = grub_parser_execute (copy);
+  grub_free (copy);
+  return err;
+}
 
 static int
 grub_ventoy_windows_parse_iso_format (const char *value, grub_uint8_t *out)
@@ -184,6 +242,396 @@ grub_ventoy_windows_open_image (const char *name)
   return file;
 }
 
+static grub_file_t
+grub_ventoy_windows_open_probe_file (const char *loopname, const char *path)
+{
+  char *full;
+  grub_file_t file;
+
+  full = grub_xasprintf ("(%s)%s", loopname, path);
+  if (!full)
+    return 0;
+
+  grub_ventoy_windows_debug_string ("vtwindows-probe", "open", full);
+  file = grub_file_open (full, GRUB_FILE_TYPE_GET_SIZE);
+  grub_free (full);
+  return file;
+}
+
+static grub_uint64_t
+grub_ventoy_windows_probe_size (const char *loopname, const char *path)
+{
+  grub_file_t file;
+  grub_uint64_t size;
+
+  file = grub_ventoy_windows_open_probe_file (loopname, path);
+  if (!file)
+    return 0;
+
+  size = grub_file_size (file);
+  grub_file_close (file);
+  return size;
+}
+
+static grub_err_t
+grub_ventoy_windows_attach_probe (const char *loopname, const char *image)
+{
+  char *script;
+  grub_err_t err;
+
+  script = grub_xasprintf (
+      "insmod loopback\n"
+      "loopback -d %s\n"
+      "loopback %s %s\n",
+      loopname, loopname, image);
+  if (!script)
+    return grub_errno;
+
+  err = grub_ventoy_windows_exec_script ("vtwindows-attach", script);
+  grub_free (script);
+  return err;
+}
+
+static char *
+grub_ventoy_windows_probe_candidates (const char *loopname, const char *scope,
+                                      const char *const *candidates,
+                                      grub_uint64_t *size_out)
+{
+  grub_uint32_t i;
+  grub_file_t file;
+  grub_uint64_t size = 0;
+
+  for (i = 0; candidates[i]; i++)
+    {
+      grub_ventoy_windows_debug_string (scope, "candidate", candidates[i]);
+      file = grub_ventoy_windows_open_probe_file (loopname, candidates[i]);
+      if (!file)
+        continue;
+
+      size = grub_file_size (file);
+      grub_file_close (file);
+      if (size_out)
+        *size_out = size;
+      grub_ventoy_windows_debug_string (scope, "selected", candidates[i]);
+      grub_ventoy_windows_debug_u64 (scope, "size", size);
+      return grub_strdup (candidates[i]);
+    }
+
+  if (size_out)
+    *size_out = 0;
+  return 0;
+}
+
+static char *
+grub_ventoy_windows_prefix_from_path (const char *path)
+{
+  if (!path || path[0] != '/')
+    return grub_strdup ("");
+
+  if (grub_strncmp (path, "/x86/", 5) == 0)
+    return grub_strdup ("/x86");
+
+  if (grub_strncmp (path, "/x64/", 5) == 0)
+    return grub_strdup ("/x64");
+
+  return grub_strdup ("");
+}
+
+static grub_err_t
+grub_ventoy_windows_probe_layout (const char *prefix, const char *image,
+                                  const char *loopname,
+                                  const char *requested_wim,
+                                  const char *requested_sdi,
+                                  const char *requested_efi,
+                                  const char *requested_inject)
+{
+  char *wim = 0;
+  char *sdi = 0;
+  char *efi = 0;
+  char *bcd = 0;
+  char *win_prefix = 0;
+  char *full = 0;
+  grub_err_t err = GRUB_ERR_NONE;
+  grub_uint64_t wim_size = 0;
+  grub_uint64_t sdi_size = 0;
+  grub_uint64_t efi_size = 0;
+  grub_uint64_t bcd_size = 0;
+  const char *const wim_candidates[] =
+    {
+      "/sources/boot.wim",
+      "/x86/sources/boot.wim",
+      "/x64/sources/boot.wim",
+      0
+    };
+  const char *const sdi_candidates_root[] =
+    {
+      "/boot/boot.sdi",
+      0
+    };
+  const char *const sdi_candidates_x86[] =
+    {
+      "/x86/boot/boot.sdi",
+      "/boot/boot.sdi",
+      0
+    };
+  const char *const sdi_candidates_x64[] =
+    {
+      "/x64/boot/boot.sdi",
+      "/boot/boot.sdi",
+      0
+    };
+  const char *const bcd_candidates_root[] =
+    {
+      "/boot/bcd",
+      "/boot/BCD",
+      0
+    };
+  const char *const bcd_candidates_x86[] =
+    {
+      "/x86/boot/bcd",
+      "/x86/boot/BCD",
+      "/boot/bcd",
+      "/boot/BCD",
+      0
+    };
+  const char *const bcd_candidates_x64[] =
+    {
+      "/x64/boot/bcd",
+      "/x64/boot/BCD",
+      "/boot/bcd",
+      "/boot/BCD",
+      0
+    };
+  const char *const efi_candidates_root[] =
+    {
+      "/efi/boot/bootx64.efi",
+      "/efi/boot/BOOTX64.EFI",
+      "/efi/microsoft/boot/bootmgfw.efi",
+      "/efi/Microsoft/Boot/bootmgfw.efi",
+      "/bootmgr.efi",
+      0
+    };
+  const char *const efi_candidates_x86[] =
+    {
+      "/x86/efi/boot/bootx64.efi",
+      "/x86/efi/boot/BOOTX64.EFI",
+      "/x86/efi/microsoft/boot/bootmgfw.efi",
+      "/x86/efi/Microsoft/Boot/bootmgfw.efi",
+      "/efi/boot/bootx64.efi",
+      "/efi/boot/BOOTX64.EFI",
+      0
+    };
+  const char *const efi_candidates_x64[] =
+    {
+      "/x64/efi/boot/bootx64.efi",
+      "/x64/efi/boot/BOOTX64.EFI",
+      "/x64/efi/microsoft/boot/bootmgfw.efi",
+      "/x64/efi/Microsoft/Boot/bootmgfw.efi",
+      "/efi/boot/bootx64.efi",
+      "/efi/boot/BOOTX64.EFI",
+      0
+    };
+  const char *const *sdi_candidates;
+  const char *const *bcd_candidates;
+  const char *const *efi_candidates;
+  ventoy_windows_data *rtdata = 0;
+  char memname[96];
+
+  grub_ventoy_windows_debug_string ("vtwindows", "probe_image", image);
+  grub_ventoy_windows_debug_string ("vtwindows", "probe_loop", loopname);
+
+  err = grub_ventoy_windows_attach_probe (loopname, image);
+  if (err != GRUB_ERR_NONE)
+    return err;
+
+  if (requested_wim && *requested_wim)
+    {
+      wim_size = grub_ventoy_windows_probe_size (loopname, requested_wim);
+      if (!wim_size)
+        return grub_error (GRUB_ERR_FILE_NOT_FOUND, "requested wim not found: %s", requested_wim);
+      wim = grub_strdup (requested_wim);
+      grub_ventoy_windows_debug_string ("vtwindows-wim", "selected", wim);
+      grub_ventoy_windows_debug_u64 ("vtwindows-wim", "size", wim_size);
+    }
+  else
+    {
+      wim = grub_ventoy_windows_probe_candidates (loopname, "vtwindows-wim",
+                                                  wim_candidates, &wim_size);
+      if (!wim)
+        return grub_error (GRUB_ERR_FILE_NOT_FOUND, "no boot.wim found in image");
+    }
+
+  win_prefix = grub_ventoy_windows_prefix_from_path (wim);
+  if (!win_prefix)
+    {
+      err = grub_errno;
+      goto fail;
+    }
+
+  if (grub_strcmp (win_prefix, "/x86") == 0)
+    {
+      sdi_candidates = sdi_candidates_x86;
+      bcd_candidates = bcd_candidates_x86;
+      efi_candidates = efi_candidates_x86;
+    }
+  else if (grub_strcmp (win_prefix, "/x64") == 0)
+    {
+      sdi_candidates = sdi_candidates_x64;
+      bcd_candidates = bcd_candidates_x64;
+      efi_candidates = efi_candidates_x64;
+    }
+  else
+    {
+      sdi_candidates = sdi_candidates_root;
+      bcd_candidates = bcd_candidates_root;
+      efi_candidates = efi_candidates_root;
+    }
+
+  if (requested_sdi && *requested_sdi)
+    {
+      sdi_size = grub_ventoy_windows_probe_size (loopname, requested_sdi);
+      if (!sdi_size)
+        {
+          err = grub_error (GRUB_ERR_FILE_NOT_FOUND, "requested sdi not found: %s", requested_sdi);
+          goto fail;
+        }
+      sdi = grub_strdup (requested_sdi);
+      grub_ventoy_windows_debug_string ("vtwindows-sdi", "selected", sdi);
+      grub_ventoy_windows_debug_u64 ("vtwindows-sdi", "size", sdi_size);
+    }
+  else
+    sdi = grub_ventoy_windows_probe_candidates (loopname, "vtwindows-sdi",
+                                                sdi_candidates, &sdi_size);
+
+  if (requested_efi && *requested_efi)
+    {
+      efi_size = grub_ventoy_windows_probe_size (loopname, requested_efi);
+      if (!efi_size)
+        {
+          err = grub_error (GRUB_ERR_FILE_NOT_FOUND, "requested efi not found: %s", requested_efi);
+          goto fail;
+        }
+      efi = grub_strdup (requested_efi);
+      grub_ventoy_windows_debug_string ("vtwindows-efi", "selected", efi);
+      grub_ventoy_windows_debug_u64 ("vtwindows-efi", "size", efi_size);
+    }
+  else
+    efi = grub_ventoy_windows_probe_candidates (loopname, "vtwindows-efi",
+                                                efi_candidates, &efi_size);
+
+  bcd = grub_ventoy_windows_probe_candidates (loopname, "vtwindows-bcd",
+                                              bcd_candidates, &bcd_size);
+
+  if (!wim || !sdi || !efi || !bcd)
+    {
+      err = grub_error (GRUB_ERR_FILE_NOT_FOUND,
+                        "incomplete windows layout (wim=%s sdi=%s efi=%s bcd=%s)",
+                        wim ? wim : "missing",
+                        sdi ? sdi : "missing",
+                        efi ? efi : "missing",
+                        bcd ? bcd : "missing");
+      goto fail;
+    }
+
+  err = grub_ventoy_windows_export (prefix, "loop", loopname);
+  if (err == GRUB_ERR_NONE)
+    err = grub_ventoy_windows_export (prefix, "prefix", win_prefix);
+  if (err == GRUB_ERR_NONE)
+    err = grub_ventoy_windows_export (prefix, "wim", wim);
+  if (err == GRUB_ERR_NONE)
+    err = grub_ventoy_windows_export (prefix, "sdi", sdi);
+  if (err == GRUB_ERR_NONE)
+    err = grub_ventoy_windows_export (prefix, "efi", efi);
+  if (err == GRUB_ERR_NONE)
+    err = grub_ventoy_windows_export (prefix, "bcd", bcd);
+
+  if (err == GRUB_ERR_NONE)
+    {
+      full = grub_xasprintf ("(%s)%s", loopname, wim);
+      if (!full)
+        err = grub_errno;
+      else
+        err = grub_ventoy_windows_export (prefix, "wim_full", full);
+      grub_free (full);
+      full = 0;
+    }
+  if (err == GRUB_ERR_NONE)
+    {
+      full = grub_xasprintf ("(%s)%s", loopname, sdi);
+      if (!full)
+        err = grub_errno;
+      else
+        err = grub_ventoy_windows_export (prefix, "sdi_full", full);
+      grub_free (full);
+      full = 0;
+    }
+  if (err == GRUB_ERR_NONE)
+    {
+      full = grub_xasprintf ("(%s)%s", loopname, efi);
+      if (!full)
+        err = grub_errno;
+      else
+        err = grub_ventoy_windows_export (prefix, "efi_full", full);
+      grub_free (full);
+      full = 0;
+    }
+  if (err == GRUB_ERR_NONE)
+    {
+      full = grub_xasprintf ("(%s)%s", loopname, bcd);
+      if (!full)
+        err = grub_errno;
+      else
+        err = grub_ventoy_windows_export (prefix, "bcd_full", full);
+      grub_free (full);
+      full = 0;
+    }
+
+  if (err == GRUB_ERR_NONE)
+    err = grub_ventoy_windows_export_u64 (prefix, "wim_size", wim_size);
+  if (err == GRUB_ERR_NONE)
+    err = grub_ventoy_windows_export_u64 (prefix, "sdi_size", sdi_size);
+  if (err == GRUB_ERR_NONE)
+    err = grub_ventoy_windows_export_u64 (prefix, "efi_size", efi_size);
+  if (err == GRUB_ERR_NONE)
+    err = grub_ventoy_windows_export_u64 (prefix, "bcd_size", bcd_size);
+
+  rtdata = grub_zalloc (sizeof (*rtdata));
+  if (!rtdata)
+    {
+      err = grub_errno;
+      goto fail;
+    }
+  if (requested_inject && *requested_inject)
+    grub_strncpy (rtdata->injection_archive, requested_inject,
+                  sizeof (rtdata->injection_archive) - 1);
+  rtdata->auto_install_len = 0;
+
+  grub_free (grub_ventoy_windows_last_rtdata_buf);
+  grub_ventoy_windows_last_rtdata_buf = rtdata;
+  grub_ventoy_windows_last_rtdata_size = sizeof (*rtdata);
+  grub_snprintf (memname, sizeof (memname), "mem:%p:size:%llu",
+                 rtdata, (unsigned long long) sizeof (*rtdata));
+
+  err = grub_ventoy_windows_export (prefix, "rtdata", memname);
+  if (err == GRUB_ERR_NONE)
+    err = grub_ventoy_windows_export_u64 (prefix, "rtdata_size", sizeof (*rtdata));
+  if (err == GRUB_ERR_NONE)
+    err = grub_ventoy_windows_export (prefix, "ready", "1");
+
+fail:
+  if (err != GRUB_ERR_NONE && rtdata && grub_ventoy_windows_last_rtdata_buf != rtdata)
+    grub_free (rtdata);
+  grub_free (full);
+  grub_free (bcd);
+  grub_free (efi);
+  grub_free (sdi);
+  grub_free (wim);
+  grub_free (win_prefix);
+  if (err != GRUB_ERR_NONE)
+    return err;
+  return GRUB_ERR_NONE;
+}
+
 static grub_err_t
 grub_ventoy_windows_prepare (grub_extcmd_context_t ctxt, int argc, char **args,
                              const char **prefix_out, grub_file_t *file_out,
@@ -211,6 +659,9 @@ grub_ventoy_windows_prepare (grub_extcmd_context_t ctxt, int argc, char **args,
   if (!grub_ventoy_windows_parse_iso_format (format_name, &iso_format))
     return grub_error (GRUB_ERR_BAD_ARGUMENT, "unsupported image format %s", format_name);
 
+  grub_ventoy_windows_debug_string ("vtwindows", "arg_image", args[0]);
+  grub_ventoy_windows_debug_string ("vtwindows", "arg_format", format_name);
+
   file = grub_ventoy_windows_open_image (args[0]);
   if (!file)
     return grub_errno;
@@ -236,14 +687,6 @@ grub_ventoy_windows_prepare (grub_extcmd_context_t ctxt, int argc, char **args,
     err = grub_ventoy_windows_export (prefix, "type", "windows");
   if (err == GRUB_ERR_NONE)
     err = grub_ventoy_windows_export (prefix, "format", format_name);
-  if (err == GRUB_ERR_NONE && state && state[VTWINDOWS_WIM].set)
-    err = grub_ventoy_windows_export_optional (prefix, "wim", state[VTWINDOWS_WIM].arg);
-  if (err == GRUB_ERR_NONE && state && state[VTWINDOWS_EFI].set)
-    err = grub_ventoy_windows_export_optional (prefix, "efi", state[VTWINDOWS_EFI].arg);
-  if (err == GRUB_ERR_NONE && state && state[VTWINDOWS_SDI].set)
-    err = grub_ventoy_windows_export_optional (prefix, "sdi", state[VTWINDOWS_SDI].arg);
-  if (err == GRUB_ERR_NONE && state && state[VTWINDOWS_INJECT].set)
-    err = grub_ventoy_windows_export_optional (prefix, "inject", state[VTWINDOWS_INJECT].arg);
   if (err == GRUB_ERR_NONE && state && state[VTWINDOWS_INDEX].set)
     err = grub_ventoy_windows_export_optional (prefix, "index", state[VTWINDOWS_INDEX].arg);
   if (err == GRUB_ERR_NONE && state && state[VTWINDOWS_GUI].set)
@@ -254,14 +697,20 @@ grub_ventoy_windows_prepare (grub_extcmd_context_t ctxt, int argc, char **args,
     err = grub_ventoy_windows_export (prefix, "rawwim", "1");
   if (err == GRUB_ERR_NONE && state && state[VTWINDOWS_PAUSE].set)
     err = grub_ventoy_windows_export (prefix, "pause", "1");
+
   if (err == GRUB_ERR_NONE)
-    err = grub_ventoy_windows_export (prefix, "ready", "1");
+    err = grub_ventoy_windows_probe_layout (
+        prefix, args[0], "vtwinprobe",
+        (state && state[VTWINDOWS_WIM].set) ? state[VTWINDOWS_WIM].arg : 0,
+        (state && state[VTWINDOWS_SDI].set) ? state[VTWINDOWS_SDI].arg : 0,
+        (state && state[VTWINDOWS_EFI].set) ? state[VTWINDOWS_EFI].arg : 0,
+        (state && state[VTWINDOWS_INJECT].set) ? state[VTWINDOWS_INJECT].arg : 0);
 
   if (err != GRUB_ERR_NONE)
     {
       grub_free (chain);
       grub_file_close (file);
-      return grub_errno;
+      return err;
     }
 
   grub_free (grub_ventoy_windows_last_chain_buf);
@@ -285,25 +734,38 @@ grub_cmd_vtwindows (grub_extcmd_context_t ctxt, int argc, char **args)
   ventoy_chain_head *chain = 0;
   grub_size_t chain_size = 0;
   grub_err_t err;
+  char *loop_name = 0;
+  char *wim_name = 0;
+  char *sdi_name = 0;
+  char *efi_name = 0;
+  const char *loop_value;
+  const char *wim_value;
+  const char *sdi_value;
+  const char *efi_value;
 
   err = grub_ventoy_windows_prepare (ctxt, argc, args, &prefix, &file, &chain, &chain_size);
   if (err != GRUB_ERR_NONE)
     return err;
 
-  grub_printf ("%s image=%s chain=%p chunks=%u\n",
-               prefix, args[0], chain, chain->img_chunk_num);
+  loop_name = grub_xasprintf ("%s_loop", prefix);
+  wim_name = grub_xasprintf ("%s_wim", prefix);
+  sdi_name = grub_xasprintf ("%s_sdi", prefix);
+  efi_name = grub_xasprintf ("%s_efi", prefix);
+  loop_value = (loop_name && grub_env_get (loop_name)) ? grub_env_get (loop_name) : "(dynamic)";
+  wim_value = (wim_name && grub_env_get (wim_name)) ? grub_env_get (wim_name) : "(missing)";
+  sdi_value = (sdi_name && grub_env_get (sdi_name)) ? grub_env_get (sdi_name) : "(missing)";
+  efi_value = (efi_name && grub_env_get (efi_name)) ? grub_env_get (efi_name) : "(missing)";
+  grub_printf ("%s image=%s chain=%p chunks=%u loop=%s wim=%s sdi=%s efi=%s\n",
+               prefix, args[0], chain, chain->img_chunk_num,
+               loop_value, wim_value, sdi_value, efi_value);
+  grub_free (efi_name);
+  grub_free (sdi_name);
+  grub_free (wim_name);
+  grub_free (loop_name);
 
   if (script && *script)
     {
-      char *copy = grub_strdup (script);
-      if (!copy)
-        {
-          grub_file_close (file);
-          return grub_errno;
-        }
-
-      err = grub_parser_execute (copy);
-      grub_free (copy);
+      err = grub_ventoy_windows_exec_script ("vtwindows-post", script);
       grub_file_close (file);
       return err;
     }
@@ -312,99 +774,32 @@ grub_cmd_vtwindows (grub_extcmd_context_t ctxt, int argc, char **args)
   return GRUB_ERR_NONE;
 }
 
-static char *
-grub_ventoy_windows_append_opt (char *script, const char *opt, const char *arg)
-{
-  char *newbuf;
-
-  if (!opt || !*opt)
-    return script;
-
-  if (arg && *arg)
-    newbuf = grub_xasprintf ("%s %s=%s", script ? script : "", opt, arg);
-  else
-    newbuf = grub_xasprintf ("%s %s", script ? script : "", opt);
-
-  grub_free (script);
-  return newbuf;
-}
-
 static grub_err_t
 grub_cmd_vtwimboot (grub_extcmd_context_t ctxt, int argc, char **args)
 {
-  struct grub_arg_list *state = ctxt ? ctxt->state : 0;
   const char *prefix = 0;
   grub_file_t file = 0;
   ventoy_chain_head *chain = 0;
   grub_size_t chain_size = 0;
-  const char *wim;
-  char *opts = 0;
-  char *script;
   grub_err_t err;
 
   err = grub_ventoy_windows_prepare (ctxt, argc, args, &prefix, &file, &chain, &chain_size);
   if (err != GRUB_ERR_NONE)
     return err;
 
-  wim = (state && state[VTWINDOWS_WIM].set) ? state[VTWINDOWS_WIM].arg : 0;
-  if (!wim || !*wim)
-    {
-      grub_file_close (file);
-      return grub_error (GRUB_ERR_BAD_ARGUMENT, "--wim is required for vtwimboot");
-    }
-
-  opts = grub_strdup ("");
-  if (!opts)
-    {
-      grub_file_close (file);
-      return grub_errno;
-    }
-
-  if (state && state[VTWINDOWS_GUI].set)
-    opts = grub_ventoy_windows_append_opt (opts, "--gui", 0);
-  if (state && state[VTWINDOWS_RAWBCD].set)
-    opts = grub_ventoy_windows_append_opt (opts, "--rawbcd", 0);
-  if (state && state[VTWINDOWS_RAWWIM].set)
-    opts = grub_ventoy_windows_append_opt (opts, "--rawwim", 0);
-  if (state && state[VTWINDOWS_PAUSE].set)
-    opts = grub_ventoy_windows_append_opt (opts, "--pause", 0);
-  if (state && state[VTWINDOWS_INDEX].set)
-    opts = grub_ventoy_windows_append_opt (opts, "--index", state[VTWINDOWS_INDEX].arg);
-  if (state && state[VTWINDOWS_INJECT].set)
-    opts = grub_ventoy_windows_append_opt (opts, "--inject", state[VTWINDOWS_INJECT].arg);
-
-  if (!opts)
-    {
-      grub_file_close (file);
-      return grub_errno;
-    }
-
-  script = grub_xasprintf (
-      "insmod loopback\n"
-      "insmod wimboot\n"
-      "loopback vtwiniso %s\n"
-      "set root=(vtwiniso)\n"
-      "wimboot%s %s\n",
-      args[0], opts, wim);
-  grub_free (opts);
   grub_file_close (file);
-
-  if (!script)
-    return grub_errno;
-
-  err = grub_parser_execute (script);
-  grub_free (script);
-  return err;
+  return grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
+                     "direct modular Windows boot is not implemented yet; use vtwindows for probing and metadata");
 }
 
 GRUB_MOD_INIT(ventoywindows)
 {
   cmd_vtwindows = grub_register_extcmd ("vtwindows", grub_cmd_vtwindows, 0,
-                                        N_("Export modular Ventoy Windows chain metadata."),
+                                        N_("Probe a Windows ISO/WIM image and export Ventoy-style metadata."),
                                         "",
                                         options_vtwindows);
   cmd_vtwimboot = grub_register_extcmd ("vtwimboot", grub_cmd_vtwimboot, 0,
-                                        N_("Boot boot.wim from an image via the existing wimboot module."),
+                                        N_("Reserved placeholder for a future standalone Windows boot path."),
                                         "",
                                         options_vtwindows);
 }
@@ -414,6 +809,9 @@ GRUB_MOD_FINI(ventoywindows)
   grub_free (grub_ventoy_windows_last_chain_buf);
   grub_ventoy_windows_last_chain_buf = 0;
   grub_ventoy_windows_last_chain_size = 0;
+  grub_free (grub_ventoy_windows_last_rtdata_buf);
+  grub_ventoy_windows_last_rtdata_buf = 0;
+  grub_ventoy_windows_last_rtdata_size = 0;
   grub_unregister_extcmd (cmd_vtwindows);
   grub_unregister_extcmd (cmd_vtwimboot);
 }
