@@ -35,6 +35,12 @@ static const struct grub_arg_option options_vtlinux[] =
      N_("PATH"), ARG_TYPE_STRING},
     {"cmdline", 'c', 0, N_("Kernel command line to export for later boot scripts."),
      N_("STRING"), ARG_TYPE_STRING},
+    {"persistence", 'p', 0, N_("Persistence image to validate and export."),
+     N_("FILE"), ARG_TYPE_STRING},
+    {"inject", 'j', 0, N_("Injection archive to validate and export."),
+     N_("FILE"), ARG_TYPE_STRING},
+    {"template", 't', 0, N_("Auto-install template to validate and export."),
+     N_("FILE"), ARG_TYPE_STRING},
     {"format", 'f', 0, N_("Set image filesystem format flag."),
      N_("iso9660|udf"), ARG_TYPE_STRING},
     {"script", 's', 0, N_("Execute a GRUB script after exporting variables."),
@@ -48,6 +54,9 @@ enum options_vtlinux
     VTLINUX_KERNEL,
     VTLINUX_INITRD,
     VTLINUX_CMDLINE,
+    VTLINUX_PERSISTENCE,
+    VTLINUX_INJECT,
+    VTLINUX_TEMPLATE,
     VTLINUX_FORMAT,
     VTLINUX_SCRIPT
   };
@@ -198,6 +207,63 @@ grub_ventoy_linux_export_image_meta (const char *prefix, grub_file_t file,
 }
 
 static grub_err_t
+grub_ventoy_linux_export_companion_meta (const char *prefix,
+                                         const char *kind,
+                                         const char *name)
+{
+  grub_file_t file;
+  const char *canonical;
+  const char *path;
+  char *value_name;
+  grub_err_t err;
+
+  if (!prefix || !kind || !name)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, "invalid ventoy linux companion arguments");
+
+  file = grub_file_open (name, GRUB_FILE_TYPE_GET_SIZE);
+  if (!file)
+    return grub_error (GRUB_ERR_FILE_NOT_FOUND, "failed to open %s %s", kind, name);
+
+  canonical = file->name ? file->name : name;
+
+  err = grub_ventoy_linux_export (prefix, kind, canonical);
+  if (err != GRUB_ERR_NONE)
+    goto out;
+
+  value_name = grub_xasprintf ("%s_size", kind);
+  if (!value_name)
+    {
+      err = grub_errno;
+      goto out;
+    }
+
+  err = grub_ventoy_linux_export_u64 (prefix, value_name, grub_file_size (file));
+  grub_free (value_name);
+  if (err != GRUB_ERR_NONE)
+    goto out;
+
+  path = grub_strchr (canonical, ')');
+  if (path)
+    path++;
+  else
+    path = canonical;
+
+  value_name = grub_xasprintf ("%s_path", kind);
+  if (!value_name)
+    {
+      err = grub_errno;
+      goto out;
+    }
+
+  err = grub_ventoy_linux_export (prefix, value_name, path);
+  grub_free (value_name);
+
+out:
+  grub_file_close (file);
+  return err;
+}
+
+static grub_err_t
 grub_cmd_vtlinux (grub_extcmd_context_t ctxt, int argc, char **args)
 {
   struct grub_arg_list *state = ctxt ? ctxt->state : 0;
@@ -258,6 +324,15 @@ grub_cmd_vtlinux (grub_extcmd_context_t ctxt, int argc, char **args)
   if (err == GRUB_ERR_NONE && state && state[VTLINUX_CMDLINE].set)
     err = grub_ventoy_linux_export_optional (prefix, "cmdline",
                                              state[VTLINUX_CMDLINE].arg);
+  if (err == GRUB_ERR_NONE && state && state[VTLINUX_PERSISTENCE].set)
+    err = grub_ventoy_linux_export_companion_meta (prefix, "persistence",
+                                                   state[VTLINUX_PERSISTENCE].arg);
+  if (err == GRUB_ERR_NONE && state && state[VTLINUX_INJECT].set)
+    err = grub_ventoy_linux_export_companion_meta (prefix, "inject",
+                                                   state[VTLINUX_INJECT].arg);
+  if (err == GRUB_ERR_NONE && state && state[VTLINUX_TEMPLATE].set)
+    err = grub_ventoy_linux_export_companion_meta (prefix, "template",
+                                                   state[VTLINUX_TEMPLATE].arg);
   if (err == GRUB_ERR_NONE)
     err = grub_ventoy_linux_export (prefix, "ready", "1");
 
@@ -299,7 +374,7 @@ GRUB_MOD_INIT(ventoylinux)
 {
   cmd_vtlinux = grub_register_extcmd (
       "vtlinux", grub_cmd_vtlinux, 0,
-      N_("[--var PREFIX] [--kernel PATH] [--initrd PATH] [--cmdline STRING] [--format iso9660|udf] [--script COMMANDS] FILE"),
+      N_("[--var PREFIX] [--kernel PATH] [--initrd PATH] [--cmdline STRING] [--persistence FILE] [--inject FILE] [--template FILE] [--format iso9660|udf] [--script COMMANDS] FILE"),
       N_("Build a ventoy Linux chain blob and export scriptable environment variables."),
       options_vtlinux);
 }
