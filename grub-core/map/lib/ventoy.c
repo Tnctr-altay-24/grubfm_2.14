@@ -92,7 +92,8 @@ ventoy_get_fs_type (const char *fs)
 }
 
 static int
-ventoy_get_disk_guid (const char *filename, grub_uint8_t *guid)
+ventoy_get_disk_guid (const char *filename, grub_uint8_t *guid,
+                      grub_uint8_t *signature)
 {
   grub_disk_t disk;
   char *device_name;
@@ -118,6 +119,7 @@ ventoy_get_disk_guid (const char *filename, grub_uint8_t *guid)
   if (disk)
   {
     grub_disk_read(disk, 0, 0x180, 16, guid);
+    grub_disk_read(disk, 0, 0x1b8, 4, signature);
     grub_disk_close(disk);
   }
   else
@@ -221,7 +223,8 @@ grub_ventoy_fill_osparam (grub_file_t file, ventoy_os_param *param)
 
   grub_snprintf (param->vtoy_img_path, sizeof(param->vtoy_img_path), "%s", pos);
 
-  ventoy_get_disk_guid(file->name, param->vtoy_disk_guid);
+  ventoy_get_disk_guid(file->name, param->vtoy_disk_guid,
+                       param->vtoy_disk_signature);
 
   param->vtoy_img_size = file->size;
 

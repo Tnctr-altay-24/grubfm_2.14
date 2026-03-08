@@ -28,6 +28,21 @@ static grub_extcmd_t cmd_vtchain;
 static void *grub_ventoy_last_chain_buf;
 static grub_size_t grub_ventoy_last_chain_size;
 
+static void
+grub_ventoy_refresh_osparam_checksum (ventoy_os_param *param)
+{
+  grub_uint32_t i;
+  grub_uint8_t chksum = 0;
+
+  if (!param)
+    return;
+
+  param->chksum = 0;
+  for (i = 0; i < sizeof (*param); i++)
+    chksum = (grub_uint8_t) (chksum + *(((grub_uint8_t *) param) + i));
+  param->chksum = (grub_uint8_t) (0x100 - chksum);
+}
+
 static const struct grub_arg_option options_vtchain[] =
   {
     {"var", 'v', 0, N_("Environment variable that receives mem:ADDR:size:LEN."),
@@ -335,6 +350,7 @@ grub_ventoy_build_chain (grub_file_t file, grub_uint8_t chain_type,
   grub_memcpy ((char *) chain + chain->img_chunk_offset, chunk_list.chunk, chunk_bytes);
   chain->os_param.vtoy_reserved[2] = chain_type;
   chain->os_param.vtoy_reserved[3] = iso_format;
+  grub_ventoy_refresh_osparam_checksum (&chain->os_param);
 
   grub_ventoy_free_chunks (&chunk_list);
   *buffer = chain;
