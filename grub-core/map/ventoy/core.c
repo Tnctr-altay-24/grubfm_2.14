@@ -192,12 +192,14 @@ grub_ventoy_finalize_chunklist (ventoy_img_chunk_list *chunk_list,
   for (i = 0; i < chunk_list->cur_chunk; i++)
     {
       grub_uint64_t disk_count;
+      grub_uint32_t img_count;
 
       disk_count = chunk_list->chunk[i].disk_end_sector + 1
                    - chunk_list->chunk[i].disk_start_sector;
+      img_count = (grub_uint32_t) ((disk_count * GRUB_DISK_SECTOR_SIZE) >> 11);
       chunk_list->chunk[i].img_start_sector = img_sector;
-      chunk_list->chunk[i].img_end_sector = img_sector + (grub_uint32_t) disk_count - 1;
-      img_sector += (grub_uint32_t) disk_count;
+      chunk_list->chunk[i].img_end_sector = img_sector + img_count - 1;
+      img_sector += img_count;
       chunk_list->chunk[i].disk_start_sector += part_start;
       chunk_list->chunk[i].disk_end_sector += part_start;
     }
@@ -227,6 +229,28 @@ grub_ventoy_collect_chunks (grub_file_t file, ventoy_img_chunk_list *chunk_list)
 
   if (file->device->disk->partition)
     part_start = grub_partition_get_start (file->device->disk->partition);
+
+  if (file->fs && file->fs->name
+      && (grub_strcmp (file->fs->name, "fat") == 0
+          || grub_strcmp (file->fs->name, "exfat") == 0))
+    {
+      if (grub_fat_get_file_chunk (part_start, file, chunk_list) != 0)
+        {
+          grub_ventoy_free_chunks (chunk_list);
+          return grub_error (GRUB_ERR_BAD_FILE_TYPE,
+                             "failed to collect FAT chunks for %s", file->name);
+        }
+
+      if (!chunk_list->cur_chunk)
+        {
+          grub_ventoy_free_chunks (chunk_list);
+          return grub_error (GRUB_ERR_BAD_FILE_TYPE, "no FAT chunks were collected");
+        }
+
+      file->offset = 0;
+      grub_errno = GRUB_ERR_NONE;
+      return GRUB_ERR_NONE;
+    }
 
   saved_hook = file->read_hook;
   saved_hook_data = file->read_hook_data;

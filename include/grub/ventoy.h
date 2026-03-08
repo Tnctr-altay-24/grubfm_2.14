@@ -305,6 +305,9 @@ grub_err_t EXPORT_FUNC(grub_ventoy_build_chain) (grub_file_t file,
                                                  grub_uint8_t iso_format,
                                                  void **buffer,
                                                  grub_size_t *buffer_size);
+int EXPORT_FUNC(grub_fat_get_file_chunk) (grub_uint64_t part_start,
+                                          grub_file_t file,
+                                          ventoy_img_chunk_list *chunk_list);
 
 GRUB_VENTOY_COMPILE_ASSERT (osparam_size, sizeof (ventoy_os_param) == 512);
 GRUB_VENTOY_COMPILE_ASSERT (secure_data_size, sizeof (ventoy_secure_data) == 4096);

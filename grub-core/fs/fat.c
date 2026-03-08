@@ -34,6 +34,7 @@
 #endif
 #include <grub/fshelp.h>
 #include <grub/i18n.h>
+#include <grub/ventoy.h>
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
@@ -1280,6 +1281,163 @@ grub_disk_addr_t
 }
 #endif
 
+#ifndef MODE_EXFAT
+int
+grub_fat_get_file_chunk (grub_uint64_t part_start, grub_file_t file,
+                         ventoy_img_chunk_list *chunk_list)
+{
+  grub_size_t size;
+  grub_uint32_t i;
+  grub_uint32_t logical_cluster;
+  unsigned logical_cluster_bits;
+  unsigned long sector;
+  grub_fshelp_node_t node;
+  grub_disk_t disk;
+  grub_uint64_t len;
+
+  if (!file || !file->device || !file->device->disk || !file->data || !chunk_list
+      || !chunk_list->chunk)
+    return -1;
+
+  disk = file->device->disk;
+  node = file->data;
+  len = file->size;
+
+#ifdef MODE_EXFAT
+  if (node->is_contiguous)
+#else
+  if (0)
+#endif
+    {
+      sector = (node->data->cluster_sector
+                + ((node->file_cluster - 2) << node->data->cluster_bits));
+
+      chunk_list->chunk[0].img_start_sector = 0;
+      chunk_list->chunk[0].img_end_sector = (grub_uint32_t) (file->size >> 11) - 1;
+      chunk_list->chunk[0].disk_start_sector = sector + part_start;
+      chunk_list->chunk[0].disk_end_sector =
+        sector + (file->size >> disk->log_sector_size) - 1 + part_start;
+      chunk_list->cur_chunk = 1;
+      return 0;
+    }
+
+  logical_cluster = 0;
+  logical_cluster_bits = (node->data->cluster_bits + GRUB_DISK_SECTOR_BITS);
+
+  if (logical_cluster < node->cur_cluster_num)
+    {
+      node->cur_cluster_num = 0;
+      node->cur_cluster = node->file_cluster;
+    }
+
+  while (len)
+    {
+      while (logical_cluster > node->cur_cluster_num)
+        {
+          grub_uint32_t next_cluster;
+          grub_uint32_t fat_offset;
+
+          switch (node->data->fat_size)
+            {
+            case 32:
+              fat_offset = node->cur_cluster << 2;
+              break;
+            case 16:
+              fat_offset = node->cur_cluster << 1;
+              break;
+            default:
+              fat_offset = node->cur_cluster + (node->cur_cluster >> 1);
+              break;
+            }
+
+          if (grub_disk_read (disk, node->data->fat_sector, fat_offset,
+                              (node->data->fat_size + 7) >> 3,
+                              (char *) &next_cluster))
+            return -1;
+
+          next_cluster = grub_le_to_cpu32 (next_cluster);
+          switch (node->data->fat_size)
+            {
+            case 16:
+              next_cluster &= 0xFFFF;
+              break;
+            case 12:
+              if (node->cur_cluster & 1)
+                next_cluster >>= 4;
+              next_cluster &= 0x0FFF;
+              break;
+            default:
+              break;
+            }
+
+          if (next_cluster >= node->data->cluster_eof_mark)
+            return 0;
+
+          if (next_cluster < 2 || (next_cluster - 2) >= node->data->num_clusters)
+            {
+              grub_error (GRUB_ERR_BAD_FS, "invalid cluster %u", next_cluster);
+              return -1;
+            }
+
+          node->cur_cluster = next_cluster;
+          node->cur_cluster_num++;
+        }
+
+      sector = (node->data->cluster_sector
+                + ((node->cur_cluster - 2) << node->data->cluster_bits));
+      size = (1U << logical_cluster_bits);
+      if (size > len)
+        size = (grub_size_t) len;
+
+      if (chunk_list->cur_chunk > 0
+          && chunk_list->chunk[chunk_list->cur_chunk - 1].disk_end_sector + 1 == sector + part_start)
+        {
+          ventoy_img_chunk *chunk = &chunk_list->chunk[chunk_list->cur_chunk - 1];
+          grub_uint32_t disk_sectors = (grub_uint32_t) (size >> disk->log_sector_size);
+          grub_uint32_t img_sectors = (grub_uint32_t) (size >> 11);
+
+          chunk->disk_end_sector += disk_sectors;
+          chunk->img_end_sector += img_sectors;
+        }
+      else
+        {
+          ventoy_img_chunk *chunk;
+
+          if (chunk_list->cur_chunk >= chunk_list->max_chunk)
+            {
+              grub_uint32_t new_max = chunk_list->max_chunk ? chunk_list->max_chunk * 2 : DEFAULT_CHUNK_NUM;
+              ventoy_img_chunk *new_chunk =
+                grub_realloc (chunk_list->chunk, new_max * sizeof (*chunk_list->chunk));
+              if (!new_chunk)
+                return -1;
+              chunk_list->chunk = new_chunk;
+              chunk_list->max_chunk = new_max;
+            }
+
+          chunk = &chunk_list->chunk[chunk_list->cur_chunk++];
+          if (chunk_list->cur_chunk == 1)
+            chunk->img_start_sector = 0;
+          else
+            chunk->img_start_sector = chunk_list->chunk[chunk_list->cur_chunk - 2].img_end_sector + 1;
+          chunk->img_end_sector = chunk->img_start_sector + (grub_uint32_t) (size >> 11) - 1;
+          chunk->disk_start_sector = sector + part_start;
+          chunk->disk_end_sector = chunk->disk_start_sector + (grub_uint32_t) (size >> disk->log_sector_size) - 1;
+        }
+
+      len -= size;
+      logical_cluster++;
+    }
+
+  for (i = 0; i < chunk_list->cur_chunk; i++)
+    {
+      if (chunk_list->chunk[i].img_end_sector < chunk_list->chunk[i].img_start_sector)
+        return -1;
+    }
+
+  return 0;
+}
+#endif
+
 static struct grub_fs grub_fat_fs =
   {
 #ifdef MODE_EXFAT
@@ -1324,4 +1482,3 @@ GRUB_MOD_FINI(fat)
 {
   grub_fs_unregister (&grub_fat_fs);
 }
-
