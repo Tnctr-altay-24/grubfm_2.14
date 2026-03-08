@@ -150,6 +150,15 @@ struct grub_ventoy_linux_boot_ctx
   struct grub_ventoy_linux_companion template_file;
 };
 
+#define GRUB_VTOY_COMM_CPIO "ventoy.cpio"
+#if defined(__arm__) || defined(__aarch64__)
+#define GRUB_VTOY_ARCH_CPIO "ventoy_arm64.cpio"
+#elif defined(__mips__)
+#define GRUB_VTOY_ARCH_CPIO "ventoy_mips64.cpio"
+#else
+#define GRUB_VTOY_ARCH_CPIO "ventoy_x86.cpio"
+#endif
+
 static grub_file_t
 grub_ventoy_linux_open_image (const char *name)
 {
@@ -167,6 +176,73 @@ grub_ventoy_linux_open_image (const char *name)
     }
 
   return file;
+}
+
+static char *
+grub_ventoy_linux_probe_runtime_path (grub_file_t image, const char *filename)
+{
+  char *path;
+  grub_file_t file;
+
+  if (!image || !image->device || !image->device->disk || !image->device->disk->name || !filename)
+    return 0;
+
+  path = grub_xasprintf ("(%s,2)/ventoy/%s", image->device->disk->name, filename);
+  if (!path)
+    return 0;
+
+  file = grub_file_open (path, GRUB_FILE_TYPE_GET_SIZE);
+  if (file)
+    {
+      grub_file_close (file);
+      return path;
+    }
+  grub_errno = GRUB_ERR_NONE;
+  grub_free (path);
+
+#ifndef GRUB_MACHINE_EFI
+  path = grub_xasprintf ("(ventoydisk)/ventoy/%s", filename);
+  if (!path)
+    return 0;
+
+  file = grub_file_open (path, GRUB_FILE_TYPE_GET_SIZE);
+  if (file)
+    {
+      grub_file_close (file);
+      return path;
+    }
+  grub_errno = GRUB_ERR_NONE;
+  grub_free (path);
+#endif
+
+  return 0;
+}
+
+static void
+grub_ventoy_linux_resolve_runtime_paths (grub_file_t image,
+                                         const char **runtime,
+                                         const char **runtime_arch,
+                                         char **runtime_alloc,
+                                         char **runtime_arch_alloc)
+{
+  if (runtime_alloc)
+    *runtime_alloc = 0;
+  if (runtime_arch_alloc)
+    *runtime_arch_alloc = 0;
+
+  if (runtime && (!*runtime || !**runtime) && runtime_alloc)
+    {
+      *runtime_alloc = grub_ventoy_linux_probe_runtime_path (image, GRUB_VTOY_COMM_CPIO);
+      if (*runtime_alloc)
+        *runtime = *runtime_alloc;
+    }
+
+  if (runtime_arch && (!*runtime_arch || !**runtime_arch) && runtime_arch_alloc)
+    {
+      *runtime_arch_alloc = grub_ventoy_linux_probe_runtime_path (image, GRUB_VTOY_ARCH_CPIO);
+      if (*runtime_arch_alloc)
+        *runtime_arch = *runtime_arch_alloc;
+    }
 }
 
 static int
@@ -593,6 +669,8 @@ grub_cmd_vtlinux (grub_extcmd_context_t ctxt, int argc, char **args)
   void *meta_buf = 0;
   grub_size_t meta_size = 0;
   struct grub_ventoy_linux_boot_ctx boot_ctx;
+  char *runtime_alloc = 0;
+  char *runtime_arch_alloc = 0;
   grub_err_t err;
 
   if (argc != 1)
@@ -629,6 +707,8 @@ grub_cmd_vtlinux (grub_extcmd_context_t ctxt, int argc, char **args)
       grub_file_close (file);
       return grub_errno;
     }
+  grub_ventoy_linux_resolve_runtime_paths (file, &boot_ctx.runtime, &boot_ctx.runtime_arch,
+                                           &runtime_alloc, &runtime_arch_alloc);
   boot_ctx.chain = chain;
   boot_ctx.chain_size = chain_size;
 
@@ -699,6 +779,8 @@ grub_cmd_vtlinux (grub_extcmd_context_t ctxt, int argc, char **args)
   if (err != GRUB_ERR_NONE)
     {
       grub_free (meta_buf);
+      grub_free (runtime_alloc);
+      grub_free (runtime_arch_alloc);
       grub_ventoy_linux_free_boot_ctx (&boot_ctx);
       grub_free (chain);
       grub_file_close (file);
@@ -711,6 +793,8 @@ grub_cmd_vtlinux (grub_extcmd_context_t ctxt, int argc, char **args)
   grub_free (grub_ventoy_linux_last_meta_buf);
   grub_ventoy_linux_last_meta_buf = meta_buf;
   grub_ventoy_linux_last_meta_size = meta_size;
+  grub_free (runtime_alloc);
+  grub_free (runtime_arch_alloc);
   grub_ventoy_linux_free_boot_ctx (&boot_ctx);
 
   grub_printf ("%s image=%s chain=%p meta=%p chunks=%u\n",
@@ -768,14 +852,29 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
 
   if (!kernel || !initrd)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, "kernel and initrd must be specified");
-  if (!runtime || !runtime_arch)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT,
-                       "runtime and runtime-arch must be specified or exported");
 
-  vtlinux_cmd = grub_xasprintf ("vtlinux --var %s --kernel %s --initrd %s --runtime %s --runtime-arch %s",
-                                prefix, kernel, initrd, runtime, runtime_arch);
+  vtlinux_cmd = grub_xasprintf ("vtlinux --var %s --kernel %s --initrd %s",
+                                prefix, kernel, initrd);
   if (!vtlinux_cmd)
     return grub_errno;
+
+  if (runtime)
+    {
+      newbuf = grub_xasprintf ("%s --runtime %s", vtlinux_cmd, runtime);
+      grub_free (vtlinux_cmd);
+      vtlinux_cmd = newbuf;
+      if (!vtlinux_cmd)
+        return grub_errno;
+    }
+
+  if (runtime_arch)
+    {
+      newbuf = grub_xasprintf ("%s --runtime-arch %s", vtlinux_cmd, runtime_arch);
+      grub_free (vtlinux_cmd);
+      vtlinux_cmd = newbuf;
+      if (!vtlinux_cmd)
+        return grub_errno;
+    }
 
   if (state && state[VTLINUXBOOT_CMDLINE].set)
     {
