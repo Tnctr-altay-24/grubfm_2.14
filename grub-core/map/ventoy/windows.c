@@ -811,19 +811,100 @@ grub_cmd_vtwindows (grub_extcmd_context_t ctxt, int argc, char **args)
 static grub_err_t
 grub_cmd_vtwimboot (grub_extcmd_context_t ctxt, int argc, char **args)
 {
+  struct grub_arg_list *state = ctxt ? ctxt->state : 0;
   const char *prefix = 0;
   grub_file_t file = 0;
   ventoy_chain_head *chain = 0;
   grub_size_t chain_size = 0;
   grub_err_t err;
+  char *wim_name = 0;
+  char *sdi_name = 0;
+  char *efi_name = 0;
+  const char *wim;
+  const char *sdi;
+  const char *efi;
+  char *script = 0;
+  char *opts = 0;
 
   err = grub_ventoy_windows_prepare (ctxt, argc, args, &prefix, &file, &chain, &chain_size);
   if (err != GRUB_ERR_NONE)
     return err;
 
+  wim_name = grub_xasprintf ("%s_wim_full", prefix);
+  sdi_name = grub_xasprintf ("%s_sdi_full", prefix);
+  efi_name = grub_xasprintf ("%s_efi_full", prefix);
+  if (!wim_name || !sdi_name || !efi_name)
+    {
+      err = grub_errno;
+      goto fail;
+    }
+
+  wim = grub_env_get (wim_name);
+  sdi = grub_env_get (sdi_name);
+  efi = grub_env_get (efi_name);
+  if (!wim || !sdi || !efi)
+    {
+      err = grub_error (GRUB_ERR_FILE_NOT_FOUND,
+                        "missing probed windows paths (wim=%s sdi=%s efi=%s)",
+                        wim ? wim : "missing",
+                        sdi ? sdi : "missing",
+                        efi ? efi : "missing");
+      goto fail;
+    }
+
+  opts = grub_strdup (" --wim --winpe=yes");
+  if (!opts)
+    {
+      err = grub_errno;
+      goto fail;
+    }
+  if (state && state[VTWINDOWS_GUI].set)
+    {
+      char *tmp = grub_xasprintf ("%s --gui", opts);
+      grub_free (opts);
+      opts = tmp;
+      if (!opts)
+        {
+          err = grub_errno;
+          goto fail;
+        }
+    }
+  if (state && state[VTWINDOWS_PAUSE].set)
+    {
+      char *tmp = grub_xasprintf ("%s --pause", opts);
+      grub_free (opts);
+      opts = tmp;
+      if (!opts)
+        {
+          err = grub_errno;
+          goto fail;
+        }
+    }
+
+  script = grub_xasprintf (
+      "insmod ntboot\n"
+      "set debug=${debug},ntbootdbg,bcddbg,wimbootdbg\n"
+      "ntboot%s --efi=%s --sdi=%s %s\n",
+      opts, efi, sdi, wim);
+  if (!script)
+    {
+      err = grub_errno;
+      goto fail;
+    }
+
   grub_file_close (file);
-  return grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
-                     "direct modular Windows boot is not implemented yet; use vtwindows for probing and metadata");
+  file = 0;
+  err = grub_ventoy_windows_exec_script ("vtwimboot", script);
+
+fail:
+  grub_free (script);
+  grub_free (opts);
+  grub_free (efi_name);
+  grub_free (sdi_name);
+  grub_free (wim_name);
+  if (file)
+    grub_file_close (file);
+  return err;
 }
 
 GRUB_MOD_INIT(ventoywindows)
