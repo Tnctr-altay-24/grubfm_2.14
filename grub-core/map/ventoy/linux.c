@@ -34,6 +34,21 @@ static void *grub_ventoy_linux_last_runtime_arch_buf;
 static grub_size_t grub_ventoy_linux_last_runtime_arch_size;
 
 static void
+grub_ventoy_linux_refresh_osparam_checksum (ventoy_os_param *param)
+{
+  grub_uint32_t i;
+  grub_uint8_t chksum = 0;
+
+  if (!param)
+    return;
+
+  param->chksum = 0;
+  for (i = 0; i < sizeof (*param); i++)
+    chksum = (grub_uint8_t) (chksum + *(((grub_uint8_t *) param) + i));
+  param->chksum = (grub_uint8_t) (0x100 - chksum);
+}
+
+static void
 grub_ventoy_linux_debug_string (const char *scope, const char *name,
                                 const char *value)
 {
@@ -87,6 +102,7 @@ grub_ventoy_linux_apply_debug_levels (ventoy_chain_head *chain)
   const char *value;
   const char *end = 0;
   unsigned long level;
+  int changed = 0;
 
   if (!chain)
     return;
@@ -96,7 +112,10 @@ grub_ventoy_linux_apply_debug_levels (ventoy_chain_head *chain)
     {
       level = grub_strtoul (value, &end, 0);
       if (end && *end == '\0' && level <= 0xffUL)
-        chain->os_param.vtoy_reserved[0] = (grub_uint8_t) level;
+        {
+          chain->os_param.vtoy_reserved[0] = (grub_uint8_t) level;
+          changed = 1;
+        }
     }
 
   value = grub_env_get ("ventoy_debug_level");
@@ -105,8 +124,14 @@ grub_ventoy_linux_apply_debug_levels (ventoy_chain_head *chain)
       end = 0;
       level = grub_strtoul (value, &end, 0);
       if (end && *end == '\0' && level <= 0xffUL)
-        chain->os_param.vtoy_reserved[1] = (grub_uint8_t) level;
+        {
+          chain->os_param.vtoy_reserved[1] = (grub_uint8_t) level;
+          changed = 1;
+        }
     }
+
+  if (changed)
+    grub_ventoy_linux_refresh_osparam_checksum (&chain->os_param);
 }
 
 static char *
