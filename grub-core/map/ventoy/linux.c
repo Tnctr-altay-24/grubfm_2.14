@@ -33,6 +33,105 @@ static grub_size_t grub_ventoy_linux_last_runtime_size;
 static void *grub_ventoy_linux_last_runtime_arch_buf;
 static grub_size_t grub_ventoy_linux_last_runtime_arch_size;
 
+static const char grub_ventoy_linux_arch_disk_hook_override[] =
+  "#!/ventoy/busybox/sh\n"
+  ". /ventoy/hook/ventoy-hook-lib.sh\n"
+  "\n"
+  "ventoy_check_dm_module() {\n"
+  "    if $GREP -q 'device-mapper' /proc/devices; then\n"
+  "        $BUSYBOX_PATH/true; return\n"
+  "    fi\n"
+  "\n"
+  "    vtlog \"device-mapper NOT found in /proc/devices, try to load kernel module\"\n"
+  "    $BUSYBOX_PATH/modprobe dm_mod >>$VTLOG 2>&1\n"
+  "    $BUSYBOX_PATH/modprobe dm-mod >>$VTLOG 2>&1\n"
+  "\n"
+  "    if ! $GREP -q 'device-mapper' /proc/devices; then\n"
+  "        vtlog \"modprobe failed, now try to insmod ko...\"\n"
+  "        $FIND /lib/modules/ -name 'dm-mod.ko*' | while read vtline; do\n"
+  "            vtload=\"$vtline\"\n"
+  "            case \"$vtline\" in\n"
+  "                *.zst)\n"
+  "                    vtlog \"decompress $vtline\"\n"
+  "                    if $VTOY_PATH/tool/zstdcat \"$vtline\" > $VTOY_PATH/extract_dm_mod.ko 2>>$VTLOG; then\n"
+  "                        vtload=$VTOY_PATH/extract_dm_mod.ko\n"
+  "                    else\n"
+  "                        vtlog \"zstdcat failed for $vtline\"\n"
+  "                        vtload=\"\"\n"
+  "                    fi\n"
+  "                    ;;\n"
+  "            esac\n"
+  "            if [ -z \"$vtload\" ]; then\n"
+  "                continue\n"
+  "            fi\n"
+  "            vtlog \"insmod $vtload\"\n"
+  "            $BUSYBOX_PATH/insmod \"$vtload\" >>$VTLOG 2>&1\n"
+  "            if $GREP -q 'device-mapper' /proc/devices; then\n"
+  "                break\n"
+  "            fi\n"
+  "        done\n"
+  "    fi\n"
+  "\n"
+  "    if $GREP -q 'device-mapper' /proc/devices; then\n"
+  "        vtlog \"device-mapper found in /proc/devices after retry\"\n"
+  "        $BUSYBOX_PATH/true; return\n"
+  "    else\n"
+  "        vtlog \"device-mapper still NOT found in /proc/devices after retry\"\n"
+  "        $BUSYBOX_PATH/false; return\n"
+  "    fi\n"
+  "}\n"
+  "\n"
+  "vtlog \"######### $0 $* ############\"\n"
+  "\n"
+  "if is_ventoy_hook_finished; then\n"
+  "    exit 0\n"
+  "fi\n"
+  "\n"
+  "wait_for_usb_disk_ready\n"
+  "\n"
+  "vtdiskname=$(get_ventoy_disk_name)\n"
+  "if [ \"$vtdiskname\" = \"unknown\" ]; then\n"
+  "    vtlog \"ventoy disk not found\"\n"
+  "    exit 0\n"
+  "fi\n"
+  "\n"
+  "ventoy_udev_disk_common_hook \"${vtdiskname#/dev/}2\" \"noreplace\"\n"
+  "\n"
+  "blkdev_num=$($VTOY_PATH/tool/dmsetup ls | grep ventoy | sed 's/.*(\\([0-9][0-9]*\\),.*\\([0-9][0-9]*\\).*/\\1:\\2/')\n"
+  "vtDM=$(ventoy_find_dm_id ${blkdev_num})\n"
+  "vtlog \"blkdev_num=$blkdev_num vtDM=$vtDM ...\"\n"
+  "\n"
+  "while [ -n \"Y\" ]; do\n"
+  "    if [ -b /dev/$vtDM ]; then\n"
+  "        break\n"
+  "    else\n"
+  "        sleep 0.3\n"
+  "    fi\n"
+  "done\n"
+  "\n"
+  "if [ -n \"$1\" ]; then\n"
+  "    vtlog \"ln -s /dev/$vtDM $1\"\n"
+  "    if [ -e \"$1\" ]; then\n"
+  "        vtlog \"$1 already exist\"\n"
+  "    else\n"
+  "        ln -s /dev/$vtDM \"$1\"\n"
+  "    fi\n"
+  "else\n"
+  "    vtLABEL=$($BUSYBOX_PATH/blkid /dev/$vtDM | $SED 's/.*LABEL=\"\\([^\"]*\\)\".*/\\1/')\n"
+  "    vtlog \"vtLABEL is $vtLABEL\"\n"
+  "    if [ -z \"$vtLABEL\" ]; then\n"
+  "        vtLABEL=$($SED 's/.*label=\\([^ ]*\\)/\\1/' /proc/cmdline)\n"
+  "        vtlog \"vtLABEL is $vtLABEL from cmdline\"\n"
+  "    fi\n"
+  "    if [ -e \"/dev/disk/by-label/$vtLABEL\" ]; then\n"
+  "        vtlog \"$1 already exist\"\n"
+  "    else\n"
+  "        ln -s /dev/$vtDM \"/dev/disk/by-label/$vtLABEL\"\n"
+  "    fi\n"
+  "fi\n"
+  "\n"
+  "set_ventoy_hook_finish\n";
+
 static void
 grub_ventoy_linux_refresh_osparam_checksum (ventoy_os_param *param)
 {
@@ -820,7 +919,7 @@ static grub_err_t
 grub_ventoy_linux_build_meta_cpio (struct grub_ventoy_linux_boot_ctx *ctx,
                                    void **buffer, grub_size_t *buffer_size)
 {
-  struct grub_ventoy_linux_cpio_entry entries[5];
+  struct grub_ventoy_linux_cpio_entry entries[6];
   grub_uint32_t count = 0;
   grub_size_t size = 0;
   char *buf;
@@ -837,6 +936,11 @@ grub_ventoy_linux_build_meta_cpio (struct grub_ventoy_linux_boot_ctx *ctx,
   entries[count].name = "ventoy/ventoy_os_param";
   entries[count].data = &ctx->chain->os_param;
   entries[count].size = sizeof (ctx->chain->os_param);
+  count++;
+
+  entries[count].name = "ventoy/hook/arch/ventoy-disk.sh";
+  entries[count].data = grub_ventoy_linux_arch_disk_hook_override;
+  entries[count].size = sizeof (grub_ventoy_linux_arch_disk_hook_override) - 1;
   count++;
 
   if (ctx->template_file.data)
