@@ -1296,6 +1296,17 @@ module = {
 };
 
 module = {
+  name = ventoywindows;
+  common = map/ventoy/windows.c;
+
+  cflags = '-Wno-strict-aliasing -fshort-wchar';
+  cppflags = '-I$(srcdir)/map/include';
+  enable = efi;
+  enable = i386_pc;
+  enable = i386_multiboot;
+};
+
+module = {
   name = memrw;
   common = commands/memrw.c;
 };
