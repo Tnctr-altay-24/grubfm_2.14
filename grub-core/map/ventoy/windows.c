@@ -359,31 +359,47 @@ grub_ventoy_windows_probe_layout (const char *prefix, const char *image,
   const char *const wim_candidates[] =
     {
       "/sources/boot.wim",
+      "/sources/BOOT.WIM",
+      "/WEPE/WEPE64.WIM",
+      "/WEPE/WEPE64",
       "/x86/sources/boot.wim",
+      "/x86/sources/BOOT.WIM",
       "/x64/sources/boot.wim",
+      "/x64/sources/BOOT.WIM",
       0
     };
   const char *const sdi_candidates_root[] =
     {
       "/boot/boot.sdi",
+      "/boot/BOOT.SDI",
+      "/WEPE/WEPE.SDI",
       0
     };
   const char *const sdi_candidates_x86[] =
     {
       "/x86/boot/boot.sdi",
+      "/x86/boot/BOOT.SDI",
       "/boot/boot.sdi",
+      "/boot/BOOT.SDI",
+      "/WEPE/WEPE.SDI",
       0
     };
   const char *const sdi_candidates_x64[] =
     {
       "/x64/boot/boot.sdi",
+      "/x64/boot/BOOT.SDI",
       "/boot/boot.sdi",
+      "/boot/BOOT.SDI",
+      "/WEPE/WEPE.SDI",
       0
     };
   const char *const bcd_candidates_root[] =
     {
       "/boot/bcd",
       "/boot/BCD",
+      "/EFI/MICROSOFT/BOOT/BCD",
+      "/efi/microsoft/boot/BCD",
+      "/efi/microsoft/boot/bcd",
       0
     };
   const char *const bcd_candidates_x86[] =
@@ -392,6 +408,9 @@ grub_ventoy_windows_probe_layout (const char *prefix, const char *image,
       "/x86/boot/BCD",
       "/boot/bcd",
       "/boot/BCD",
+      "/EFI/MICROSOFT/BOOT/BCD",
+      "/efi/microsoft/boot/BCD",
+      "/efi/microsoft/boot/bcd",
       0
     };
   const char *const bcd_candidates_x64[] =
@@ -400,6 +419,9 @@ grub_ventoy_windows_probe_layout (const char *prefix, const char *image,
       "/x64/boot/BCD",
       "/boot/bcd",
       "/boot/BCD",
+      "/EFI/MICROSOFT/BOOT/BCD",
+      "/efi/microsoft/boot/BCD",
+      "/efi/microsoft/boot/bcd",
       0
     };
   const char *const efi_candidates_root[] =
@@ -408,6 +430,10 @@ grub_ventoy_windows_probe_layout (const char *prefix, const char *image,
       "/efi/boot/BOOTX64.EFI",
       "/efi/microsoft/boot/bootmgfw.efi",
       "/efi/Microsoft/Boot/bootmgfw.efi",
+      "/EFI/BOOT/bootx64.efi",
+      "/EFI/BOOT/BOOTX64.EFI",
+      "/BOOTMGR",
+      "/bootmgr",
       "/bootmgr.efi",
       0
     };
@@ -419,6 +445,10 @@ grub_ventoy_windows_probe_layout (const char *prefix, const char *image,
       "/x86/efi/Microsoft/Boot/bootmgfw.efi",
       "/efi/boot/bootx64.efi",
       "/efi/boot/BOOTX64.EFI",
+      "/EFI/BOOT/bootx64.efi",
+      "/EFI/BOOT/BOOTX64.EFI",
+      "/BOOTMGR",
+      "/bootmgr",
       0
     };
   const char *const efi_candidates_x64[] =
@@ -429,6 +459,10 @@ grub_ventoy_windows_probe_layout (const char *prefix, const char *image,
       "/x64/efi/Microsoft/Boot/bootmgfw.efi",
       "/efi/boot/bootx64.efi",
       "/efi/boot/BOOTX64.EFI",
+      "/EFI/BOOT/bootx64.efi",
+      "/EFI/BOOT/BOOTX64.EFI",
+      "/BOOTMGR",
+      "/bootmgr",
       0
     };
   const char *const *sdi_candidates;
