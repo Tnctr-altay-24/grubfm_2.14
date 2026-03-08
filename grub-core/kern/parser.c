@@ -342,4 +342,3 @@ grub_parser_execute (char *source)
 
   return grub_errno;
 }
-GRUB_EXPORT (grub_parser_execute);
