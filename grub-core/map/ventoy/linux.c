@@ -77,6 +77,86 @@ grub_ventoy_linux_debug_env (const char *scope, const char *prefix,
   grub_free (name);
 }
 
+static char *
+grub_ventoy_linux_prepare_cmdline (const char *cmdline)
+{
+  const char *scan;
+  char *out;
+  char *cur;
+  grub_size_t alloc;
+  int has_rdinit = 0;
+
+  if (!cmdline || !*cmdline)
+    return grub_strdup ("rdinit=/sbin/init");
+
+  alloc = grub_strlen (cmdline) + 64;
+  out = grub_malloc (alloc);
+  if (!out)
+    return 0;
+
+  for (scan = cmdline; *scan; )
+    {
+      const char *start;
+      grub_size_t len;
+
+      while (*scan == ' ')
+        scan++;
+      if (!*scan)
+        break;
+
+      start = scan;
+      while (*scan && *scan != ' ')
+        scan++;
+      len = (grub_size_t) (scan - start);
+
+      if (len == 17 && grub_strncmp (start, "rdinit=/sbin/init", 17) == 0)
+        has_rdinit = 1;
+    }
+
+  cur = out;
+  if (!has_rdinit)
+    {
+      grub_memcpy (cur, "rdinit=/sbin/init ", 18);
+      cur += 18;
+    }
+
+  for (scan = cmdline; *scan; )
+    {
+      const char *start;
+      grub_size_t len;
+
+      while (*scan == ' ')
+        scan++;
+      if (!*scan)
+        break;
+
+      start = scan;
+      while (*scan && *scan != ' ')
+        scan++;
+      len = (grub_size_t) (scan - start);
+
+      if (len > 7 && grub_strncmp (start, "rdinit=", 7) == 0)
+        {
+          grub_memcpy (cur, "vtinit=", 7);
+          cur += 7;
+          grub_memcpy (cur, start + 7, len - 7);
+          cur += len - 7;
+        }
+      else
+        {
+          grub_memcpy (cur, start, len);
+          cur += len;
+        }
+
+      *cur++ = ' ';
+    }
+
+  if (cur > out && cur[-1] == ' ')
+    cur--;
+  *cur = '\0';
+  return out;
+}
+
 static const struct grub_arg_option options_vtlinux[] =
   {
     {"var", 'v', 0, N_("Environment variable prefix that receives exported values."),
@@ -887,6 +967,7 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
   const char *loop_name;
   const char *runtime;
   const char *runtime_arch;
+  char *effective_cmdline;
   char *vtlinux_cmd;
   char *script;
   char *boot_script;
@@ -906,14 +987,21 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
                                                "ventoy_linux_runtime");
   runtime_arch = grub_ventoy_linux_get_runtime_arg (state, VTLINUXBOOT_RUNTIME_ARCH,
                                                     "ventoy_linux_runtime_arch");
+  effective_cmdline = grub_ventoy_linux_prepare_cmdline (
+      (state && state[VTLINUXBOOT_CMDLINE].set) ? state[VTLINUXBOOT_CMDLINE].arg : 0);
 
   if (!kernel || !initrd)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, "kernel and initrd must be specified");
+  if (!effective_cmdline)
+    return grub_errno;
 
   vtlinux_cmd = grub_xasprintf ("vtlinux --var %s --kernel %s --initrd %s",
                                 prefix, kernel, initrd);
   if (!vtlinux_cmd)
-    return grub_errno;
+    {
+      grub_free (effective_cmdline);
+      return grub_errno;
+    }
 
   if (runtime)
     {
@@ -921,7 +1009,10 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
       grub_free (vtlinux_cmd);
       vtlinux_cmd = newbuf;
       if (!vtlinux_cmd)
-        return grub_errno;
+        {
+          grub_free (effective_cmdline);
+          return grub_errno;
+        }
     }
 
   if (runtime_arch)
@@ -930,17 +1021,18 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
       grub_free (vtlinux_cmd);
       vtlinux_cmd = newbuf;
       if (!vtlinux_cmd)
-        return grub_errno;
+        {
+          grub_free (effective_cmdline);
+          return grub_errno;
+        }
     }
-
-  if (state && state[VTLINUXBOOT_CMDLINE].set)
+  newbuf = grub_xasprintf ("%s --cmdline \"%s\"", vtlinux_cmd, effective_cmdline);
+  grub_free (vtlinux_cmd);
+  vtlinux_cmd = newbuf;
+  if (!vtlinux_cmd)
     {
-      newbuf = grub_xasprintf ("%s --cmdline \"%s\"", vtlinux_cmd,
-                               state[VTLINUXBOOT_CMDLINE].arg);
-      grub_free (vtlinux_cmd);
-      vtlinux_cmd = newbuf;
-      if (!vtlinux_cmd)
-        return grub_errno;
+      grub_free (effective_cmdline);
+      return grub_errno;
     }
 
   if (state && state[VTLINUXBOOT_PERSISTENCE].set)
@@ -950,7 +1042,10 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
       grub_free (vtlinux_cmd);
       vtlinux_cmd = newbuf;
       if (!vtlinux_cmd)
-        return grub_errno;
+        {
+          grub_free (effective_cmdline);
+          return grub_errno;
+        }
     }
 
   if (state && state[VTLINUXBOOT_INJECT].set)
@@ -960,7 +1055,10 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
       grub_free (vtlinux_cmd);
       vtlinux_cmd = newbuf;
       if (!vtlinux_cmd)
-        return grub_errno;
+        {
+          grub_free (effective_cmdline);
+          return grub_errno;
+        }
     }
 
   if (state && state[VTLINUXBOOT_TEMPLATE].set)
@@ -970,7 +1068,10 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
       grub_free (vtlinux_cmd);
       vtlinux_cmd = newbuf;
       if (!vtlinux_cmd)
-        return grub_errno;
+        {
+          grub_free (effective_cmdline);
+          return grub_errno;
+        }
     }
 
   if (state && state[VTLINUXBOOT_FORMAT].set)
@@ -980,13 +1081,19 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
       grub_free (vtlinux_cmd);
       vtlinux_cmd = newbuf;
       if (!vtlinux_cmd)
-        return grub_errno;
+        {
+          grub_free (effective_cmdline);
+          return grub_errno;
+        }
     }
 
   script = grub_xasprintf ("%s %s", vtlinux_cmd, args[0]);
   grub_free (vtlinux_cmd);
   if (!script)
-    return grub_errno;
+    {
+      grub_free (effective_cmdline);
+      return grub_errno;
+    }
 
   boot_script = grub_xasprintf (
       "loopback %s ${%s_image}\n"
@@ -1000,12 +1107,14 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
   if (!boot_script)
     {
       grub_free (script);
+      grub_free (effective_cmdline);
       return grub_errno;
     }
 
   grub_ventoy_linux_debug_string ("vtlinuxboot", "arg_image", args[0]);
   grub_ventoy_linux_debug_string ("vtlinuxboot", "runtime", runtime);
   grub_ventoy_linux_debug_string ("vtlinuxboot", "runtime_arch", runtime_arch);
+  grub_ventoy_linux_debug_string ("vtlinuxboot", "effective_cmdline", effective_cmdline);
   grub_ventoy_linux_debug_script ("vtlinuxboot", script);
   grub_ventoy_linux_debug_script ("vtlinuxboot-post", boot_script);
   err = grub_parser_execute (script);
@@ -1013,6 +1122,7 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
     err = grub_parser_execute (boot_script);
   grub_free (boot_script);
   grub_free (script);
+  grub_free (effective_cmdline);
   return err;
 }
 
