@@ -27,6 +27,24 @@ static void *grub_ventoy_windows_last_chain_buf;
 static grub_size_t grub_ventoy_windows_last_chain_size;
 static void *grub_ventoy_windows_last_rtdata_buf;
 static grub_size_t grub_ventoy_windows_last_rtdata_size;
+static grub_uint32_t grub_ventoy_windows_patch_count;
+
+static grub_err_t grub_ventoy_windows_export (const char *prefix,
+                                              const char *suffix,
+                                              const char *value);
+static grub_err_t grub_ventoy_windows_export_u64 (const char *prefix,
+                                                  const char *suffix,
+                                                  grub_uint64_t value);
+
+struct grub_ventoy_windows_patch
+{
+  grub_uint16_t pathlen;
+  int valid;
+  char path[256];
+  struct grub_ventoy_windows_patch *next;
+};
+
+static struct grub_ventoy_windows_patch *grub_ventoy_windows_patch_head;
 
 enum options_vtwindows
 {
@@ -123,6 +141,171 @@ grub_ventoy_windows_exec_script (const char *scope, const char *script)
   err = grub_parser_execute (copy);
   grub_free (copy);
   return err;
+}
+
+static void
+grub_ventoy_windows_reset_patches (void)
+{
+  struct grub_ventoy_windows_patch *node;
+  struct grub_ventoy_windows_patch *next;
+
+  for (node = grub_ventoy_windows_patch_head; node; node = next)
+    {
+      next = node->next;
+      grub_free (node);
+    }
+
+  grub_ventoy_windows_patch_head = 0;
+  grub_ventoy_windows_patch_count = 0;
+}
+
+static struct grub_ventoy_windows_patch *
+grub_ventoy_windows_find_patch (const char *path)
+{
+  struct grub_ventoy_windows_patch *node;
+  grub_size_t len;
+
+  if (!path)
+    return 0;
+
+  len = grub_strlen (path);
+  for (node = grub_ventoy_windows_patch_head; node; node = node->next)
+    if (node->pathlen == len && grub_strcmp (node->path, path) == 0)
+      return node;
+
+  return 0;
+}
+
+static grub_err_t
+grub_ventoy_windows_add_patch (const char *path)
+{
+  struct grub_ventoy_windows_patch *node;
+
+  if (!path || !*path)
+    return GRUB_ERR_NONE;
+
+  if (grub_ventoy_windows_find_patch (path))
+    return GRUB_ERR_NONE;
+
+  node = grub_zalloc (sizeof (*node));
+  if (!node)
+    return grub_errno;
+
+  node->pathlen = grub_snprintf (node->path, sizeof (node->path), "%s", path);
+  node->valid = 1;
+  node->next = grub_ventoy_windows_patch_head;
+  grub_ventoy_windows_patch_head = node;
+  grub_ventoy_windows_patch_count++;
+  grub_ventoy_windows_debug_string ("vtwindows-patch", "add", node->path);
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
+grub_ventoy_windows_collect_bcd_patches (const char *loopname, const char *bcd_path)
+{
+  grub_file_t file;
+  char *full = 0;
+  char *buf = 0;
+  grub_uint64_t file_size;
+  grub_size_t i;
+  grub_size_t j;
+  grub_size_t k;
+  grub_uint64_t magic;
+  grub_uint8_t byte;
+  char path[256];
+  char c;
+
+  if (!loopname || !bcd_path)
+    return GRUB_ERR_NONE;
+
+  full = grub_xasprintf ("(%s)%s", loopname, bcd_path);
+  if (!full)
+    return grub_errno;
+
+  grub_ventoy_windows_debug_string ("vtwindows-patch", "scan_bcd", full);
+  file = grub_file_open (full, GRUB_FILE_TYPE_GET_SIZE);
+  grub_free (full);
+  if (!file)
+    {
+      grub_errno = GRUB_ERR_NONE;
+      return GRUB_ERR_NONE;
+    }
+
+  file_size = grub_file_size (file);
+  buf = grub_malloc (file_size + 8);
+  if (!buf)
+    {
+      grub_file_close (file);
+      return grub_errno;
+    }
+
+  grub_memset (buf, 0, file_size + 8);
+  grub_file_read (file, buf, file_size);
+  grub_file_close (file);
+
+  for (i = 0; i + 8 < file_size; i++)
+    {
+      if ((unsigned char) buf[i + 8] != 0)
+        continue;
+
+      magic = *(grub_uint64_t *) (buf + i);
+      if (magic != 0x006D00690077002EULL &&
+          magic != 0x004D00490057002EULL &&
+          magic != 0x006D00690057002EULL)
+        continue;
+
+      for (j = i; j > 0; j -= 2)
+        if (*(grub_uint16_t *) (buf + j) == 0)
+          break;
+
+      if (j == 0)
+        continue;
+
+      byte = (grub_uint8_t) (*(grub_uint16_t *) (buf + j + 2));
+      if (byte != '/' && byte != '\\')
+        continue;
+
+      for (k = 0, j += 2; k < sizeof (path) - 1 && j < i + 8; j += 2)
+        {
+          byte = (grub_uint8_t) (*(grub_uint16_t *) (buf + j));
+          c = (char) byte;
+          if (byte > '~' || byte < ' ')
+            break;
+          if (c == '\\')
+            c = '/';
+          path[k++] = c;
+        }
+      path[k] = '\0';
+      if (k > 0)
+        grub_ventoy_windows_add_patch (path);
+    }
+
+  grub_free (buf);
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
+grub_ventoy_windows_export_patches (const char *prefix)
+{
+  struct grub_ventoy_windows_patch *node;
+  grub_uint32_t index;
+  grub_err_t err;
+  char suffix[32];
+
+  err = grub_ventoy_windows_export_u64 (prefix, "patch_count",
+                                        grub_ventoy_windows_patch_count);
+  if (err != GRUB_ERR_NONE)
+    return err;
+
+  for (index = 0, node = grub_ventoy_windows_patch_head; node; node = node->next, index++)
+    {
+      grub_snprintf (suffix, sizeof (suffix), "patch_%u", (unsigned) index);
+      err = grub_ventoy_windows_export (prefix, suffix, node->path);
+      if (err != GRUB_ERR_NONE)
+        return err;
+    }
+
+  return GRUB_ERR_NONE;
 }
 
 static int
@@ -629,6 +812,14 @@ grub_ventoy_windows_probe_layout (const char *prefix, const char *image,
   if (err == GRUB_ERR_NONE)
     err = grub_ventoy_windows_export_u64 (prefix, "bcd_size", bcd_size);
 
+  if (err == GRUB_ERR_NONE)
+    {
+      grub_ventoy_windows_reset_patches ();
+      err = grub_ventoy_windows_collect_bcd_patches (loopname, bcd);
+    }
+  if (err == GRUB_ERR_NONE)
+    err = grub_ventoy_windows_export_patches (prefix);
+
   rtdata = grub_zalloc (sizeof (*rtdata));
   if (!rtdata)
     {
@@ -921,6 +1112,7 @@ GRUB_MOD_INIT(ventoywindows)
 
 GRUB_MOD_FINI(ventoywindows)
 {
+  grub_ventoy_windows_reset_patches ();
   grub_free (grub_ventoy_windows_last_chain_buf);
   grub_ventoy_windows_last_chain_buf = 0;
   grub_ventoy_windows_last_chain_size = 0;
