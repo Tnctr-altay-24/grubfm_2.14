@@ -29,6 +29,54 @@ static grub_size_t grub_ventoy_linux_last_chain_size;
 static void *grub_ventoy_linux_last_meta_buf;
 static grub_size_t grub_ventoy_linux_last_meta_size;
 
+static void
+grub_ventoy_linux_debug_string (const char *scope, const char *name,
+                                const char *value)
+{
+  grub_size_t len = value ? grub_strlen (value) : 0;
+  grub_uint8_t last = (value && len) ? (grub_uint8_t) value[len - 1] : 0;
+
+  grub_printf ("ventoydbg:%s %s=\"%s\" len=%llu last=0x%02x\n",
+               scope ? scope : "(null)",
+               name ? name : "(null)",
+               value ? value : "(null)",
+               (unsigned long long) len, last);
+  grub_dprintf ("ventoydbg", "%s %s=\"%s\" len=%llu last=0x%02x\n",
+                scope ? scope : "(null)",
+                name ? name : "(null)",
+                value ? value : "(null)",
+                (unsigned long long) len, last);
+}
+
+static void
+grub_ventoy_linux_debug_script (const char *scope, const char *script)
+{
+  grub_ventoy_linux_debug_string (scope, "script", script);
+  if (script)
+    {
+      grub_printf ("ventoydbg:%s script-begin\n%s\nventoydbg:%s script-end\n",
+                   scope ? scope : "(null)", script, scope ? scope : "(null)");
+      grub_dprintf ("ventoydbg", "%s script-begin\n%s\n%s script-end\n",
+                    scope ? scope : "(null)", script, scope ? scope : "(null)");
+    }
+}
+
+static void
+grub_ventoy_linux_debug_env (const char *scope, const char *prefix,
+                             const char *suffix)
+{
+  char *name;
+  const char *value;
+
+  name = grub_xasprintf ("%s_%s", prefix, suffix);
+  if (!name)
+    return;
+
+  value = grub_env_get (name);
+  grub_ventoy_linux_debug_string (scope, name, value);
+  grub_free (name);
+}
+
 static const struct grub_arg_option options_vtlinux[] =
   {
     {"var", 'v', 0, N_("Environment variable prefix that receives exported values."),
@@ -799,6 +847,13 @@ grub_cmd_vtlinux (grub_extcmd_context_t ctxt, int argc, char **args)
 
   grub_printf ("%s image=%s chain=%p meta=%p chunks=%u\n",
                prefix, args[0], chain, meta_buf, chain->img_chunk_num);
+  grub_ventoy_linux_debug_string ("vtlinux", "arg_image", args[0]);
+  grub_ventoy_linux_debug_env ("vtlinux", prefix, "image");
+  grub_ventoy_linux_debug_env ("vtlinux", prefix, "runtime");
+  grub_ventoy_linux_debug_env ("vtlinux", prefix, "runtime_arch");
+  grub_ventoy_linux_debug_env ("vtlinux", prefix, "kernel");
+  grub_ventoy_linux_debug_env ("vtlinux", prefix, "initrd");
+  grub_ventoy_linux_debug_env ("vtlinux", prefix, "cmdline");
 
   if (script && *script)
     {
@@ -809,6 +864,7 @@ grub_cmd_vtlinux (grub_extcmd_context_t ctxt, int argc, char **args)
           return grub_errno;
         }
 
+      grub_ventoy_linux_debug_script ("vtlinux", script_copy);
       err = grub_parser_execute (script_copy);
       grub_free (script_copy);
       grub_file_close (file);
@@ -941,6 +997,10 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
   if (!script)
     return grub_errno;
 
+  grub_ventoy_linux_debug_string ("vtlinuxboot", "arg_image", args[0]);
+  grub_ventoy_linux_debug_string ("vtlinuxboot", "runtime", runtime);
+  grub_ventoy_linux_debug_string ("vtlinuxboot", "runtime_arch", runtime_arch);
+  grub_ventoy_linux_debug_script ("vtlinuxboot", script);
   err = grub_parser_execute (script);
   grub_free (script);
   return err;
