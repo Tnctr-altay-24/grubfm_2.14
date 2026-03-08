@@ -81,6 +81,34 @@ grub_ventoy_linux_debug_env (const char *scope, const char *prefix,
   grub_free (name);
 }
 
+static void
+grub_ventoy_linux_apply_debug_levels (ventoy_chain_head *chain)
+{
+  const char *value;
+  const char *end = 0;
+  unsigned long level;
+
+  if (!chain)
+    return;
+
+  value = grub_env_get ("ventoy_break_level");
+  if (value && *value)
+    {
+      level = grub_strtoul (value, &end, 0);
+      if (end && *end == '\0' && level <= 0xffUL)
+        chain->os_param.vtoy_reserved[0] = (grub_uint8_t) level;
+    }
+
+  value = grub_env_get ("ventoy_debug_level");
+  if (value && *value)
+    {
+      end = 0;
+      level = grub_strtoul (value, &end, 0);
+      if (end && *end == '\0' && level <= 0xffUL)
+        chain->os_param.vtoy_reserved[1] = (grub_uint8_t) level;
+    }
+}
+
 static char *
 grub_ventoy_linux_prepare_cmdline (const char *cmdline)
 {
@@ -944,6 +972,7 @@ grub_cmd_vtlinux (grub_extcmd_context_t ctxt, int argc, char **args)
                                            &runtime_alloc, &runtime_arch_alloc);
   boot_ctx.chain = chain;
   boot_ctx.chain_size = chain_size;
+  grub_ventoy_linux_apply_debug_levels (chain);
 
   grub_snprintf (memname, sizeof (memname), "mem:%p:size:%llu",
                  chain, (unsigned long long) chain_size);
