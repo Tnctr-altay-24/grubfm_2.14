@@ -28,6 +28,10 @@ static void *grub_ventoy_linux_last_chain_buf;
 static grub_size_t grub_ventoy_linux_last_chain_size;
 static void *grub_ventoy_linux_last_meta_buf;
 static grub_size_t grub_ventoy_linux_last_meta_size;
+static void *grub_ventoy_linux_last_runtime_buf;
+static grub_size_t grub_ventoy_linux_last_runtime_size;
+static void *grub_ventoy_linux_last_runtime_arch_buf;
+static grub_size_t grub_ventoy_linux_last_runtime_arch_size;
 
 static void
 grub_ventoy_linux_debug_string (const char *scope, const char *name,
@@ -87,7 +91,7 @@ grub_ventoy_linux_prepare_cmdline (const char *cmdline)
   int has_rdinit = 0;
 
   if (!cmdline || !*cmdline)
-    return grub_strdup ("rdinit=/sbin/init");
+    return grub_strdup ("rdinit=/vtoy/vtoy");
 
   alloc = grub_strlen (cmdline) + 64;
   out = grub_malloc (alloc);
@@ -111,12 +115,14 @@ grub_ventoy_linux_prepare_cmdline (const char *cmdline)
 
       if (len == 17 && grub_strncmp (start, "rdinit=/sbin/init", 17) == 0)
         has_rdinit = 1;
+      else if (len == 17 && grub_strncmp (start, "rdinit=/vtoy/vtoy", 17) == 0)
+        has_rdinit = 1;
     }
 
   cur = out;
   if (!has_rdinit)
     {
-      grub_memcpy (cur, "rdinit=/sbin/init ", 18);
+      grub_memcpy (cur, "rdinit=/vtoy/vtoy ", 18);
       cur += 18;
     }
 
@@ -273,6 +279,8 @@ struct grub_ventoy_linux_boot_ctx
   const char *runtime_arch;
   ventoy_chain_head *chain;
   grub_size_t chain_size;
+  struct grub_ventoy_linux_companion runtime_file;
+  struct grub_ventoy_linux_companion runtime_arch_file;
   struct grub_ventoy_linux_companion persistence;
   struct grub_ventoy_linux_companion inject;
   struct grub_ventoy_linux_companion template_file;
@@ -505,6 +513,75 @@ grub_ventoy_linux_align4 (grub_size_t size)
   return (size + 3U) & ~3U;
 }
 
+static grub_uint32_t
+grub_ventoy_linux_cpio_get_int (const char *value)
+{
+  grub_uint32_t ret = 0;
+  int i;
+
+  for (i = 0; i < 8; i++)
+    {
+      ret <<= 4;
+      if (value[i] >= '0' && value[i] <= '9')
+        ret |= (grub_uint32_t) (value[i] - '0');
+      else if (value[i] >= 'a' && value[i] <= 'f')
+        ret |= (grub_uint32_t) (value[i] - 'a' + 10);
+      else if (value[i] >= 'A' && value[i] <= 'F')
+        ret |= (grub_uint32_t) (value[i] - 'A' + 10);
+    }
+
+  return ret;
+}
+
+static grub_err_t
+grub_ventoy_linux_runtime_make_noinit (void *buffer, grub_size_t size)
+{
+  char *pos;
+  char *end;
+
+  if (!buffer || size < 110)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, "invalid ventoy runtime cpio");
+
+  pos = (char *) buffer;
+  end = pos + size;
+  while (pos + 110 <= end)
+    {
+      grub_uint32_t namesize;
+      grub_uint32_t filesize;
+      grub_size_t entry_size;
+      char *name;
+
+      if (grub_memcmp (pos, "070701", 6) != 0)
+        return grub_error (GRUB_ERR_BAD_OS, "unsupported ventoy runtime cpio header");
+
+      namesize = grub_ventoy_linux_cpio_get_int (pos + 94);
+      filesize = grub_ventoy_linux_cpio_get_int (pos + 54);
+      if (namesize == 0 || pos + 110 + namesize > end)
+        return grub_error (GRUB_ERR_BAD_OS, "invalid ventoy runtime cpio name");
+
+      name = pos + 110;
+      if (grub_strcmp (name, "TRAILER!!!") == 0)
+        return GRUB_ERR_NONE;
+
+      if (grub_strcmp (name, "init") == 0)
+        grub_memcpy (name, "xxxx", 4);
+      else if (grub_strcmp (name, "linuxrc") == 0)
+        grub_memcpy (name, "vtoyxrc", 7);
+      else if (grub_strcmp (name, "sbin") == 0)
+        grub_memcpy (name, "vtoy", 4);
+      else if (grub_strcmp (name, "sbin/init") == 0)
+        grub_memcpy (name, "vtoy/vtoy", 9);
+
+      entry_size = grub_ventoy_linux_align4 (110 + namesize);
+      entry_size += grub_ventoy_linux_align4 (filesize);
+      if (pos + entry_size > end)
+        return grub_error (GRUB_ERR_BAD_OS, "invalid ventoy runtime cpio entry size");
+      pos += entry_size;
+    }
+
+  return grub_error (GRUB_ERR_BAD_OS, "ventoy runtime cpio trailer not found");
+}
+
 static grub_size_t
 grub_ventoy_linux_cpio_entry_size (const char *name, grub_size_t size)
 {
@@ -637,12 +714,38 @@ grub_ventoy_linux_prepare_companion (struct grub_ventoy_linux_companion *compani
   return err;
 }
 
+static grub_err_t
+grub_ventoy_linux_prepare_runtime (struct grub_ventoy_linux_companion *companion,
+                                   const char *path, int noinit)
+{
+  grub_err_t err;
+
+  if (!companion)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, "invalid ventoy linux runtime state");
+
+  grub_ventoy_linux_reset_companion (companion);
+  if (!path)
+    return GRUB_ERR_NONE;
+
+  companion->path = path;
+  err = grub_ventoy_linux_read_file_to_buf (path, &companion->data, &companion->size);
+  if (err != GRUB_ERR_NONE)
+    return err;
+
+  if (noinit)
+    return grub_ventoy_linux_runtime_make_noinit (companion->data, companion->size);
+
+  return GRUB_ERR_NONE;
+}
+
 static void
 grub_ventoy_linux_free_boot_ctx (struct grub_ventoy_linux_boot_ctx *ctx)
 {
   if (!ctx)
     return;
 
+  grub_ventoy_linux_reset_companion (&ctx->runtime_file);
+  grub_ventoy_linux_reset_companion (&ctx->runtime_arch_file);
   grub_ventoy_linux_reset_companion (&ctx->persistence);
   grub_ventoy_linux_reset_companion (&ctx->inject);
   grub_ventoy_linux_reset_companion (&ctx->template_file);
@@ -794,6 +897,8 @@ grub_cmd_vtlinux (grub_extcmd_context_t ctxt, int argc, char **args)
   ventoy_chain_head *chain;
   grub_size_t chain_size;
   char memname[96];
+  char runtime_memname[96];
+  char runtime_arch_memname[96];
   void *meta_buf = 0;
   grub_size_t meta_size = 0;
   struct grub_ventoy_linux_boot_ctx boot_ctx;
@@ -864,6 +969,12 @@ grub_cmd_vtlinux (grub_extcmd_context_t ctxt, int argc, char **args)
     err = grub_ventoy_linux_export_optional (prefix, "cmdline",
                                              state[VTLINUX_CMDLINE].arg);
   if (err == GRUB_ERR_NONE)
+    err = grub_ventoy_linux_prepare_runtime (&boot_ctx.runtime_file,
+                                             boot_ctx.runtime, 1);
+  if (err == GRUB_ERR_NONE)
+    err = grub_ventoy_linux_prepare_runtime (&boot_ctx.runtime_arch_file,
+                                             boot_ctx.runtime_arch, 0);
+  if (err == GRUB_ERR_NONE)
     err = grub_ventoy_linux_prepare_companion (&boot_ctx.persistence,
                                                (state && state[VTLINUX_PERSISTENCE].set)
                                                  ? state[VTLINUX_PERSISTENCE].arg : 0,
@@ -887,10 +998,20 @@ grub_cmd_vtlinux (grub_extcmd_context_t ctxt, int argc, char **args)
   if (err == GRUB_ERR_NONE && state && state[VTLINUX_TEMPLATE].set)
     err = grub_ventoy_linux_export_companion_meta (prefix, "template",
                                                    state[VTLINUX_TEMPLATE].arg);
-  if (err == GRUB_ERR_NONE && boot_ctx.runtime)
-    err = grub_ventoy_linux_export (prefix, "runtime", boot_ctx.runtime);
-  if (err == GRUB_ERR_NONE && boot_ctx.runtime_arch)
-    err = grub_ventoy_linux_export (prefix, "runtime_arch", boot_ctx.runtime_arch);
+  if (err == GRUB_ERR_NONE && boot_ctx.runtime_file.data)
+    {
+      grub_snprintf (runtime_memname, sizeof (runtime_memname), "mem:%p:size:%llu",
+                     boot_ctx.runtime_file.data,
+                     (unsigned long long) boot_ctx.runtime_file.size);
+      err = grub_ventoy_linux_export (prefix, "runtime", runtime_memname);
+    }
+  if (err == GRUB_ERR_NONE && boot_ctx.runtime_arch_file.data)
+    {
+      grub_snprintf (runtime_arch_memname, sizeof (runtime_arch_memname), "mem:%p:size:%llu",
+                     boot_ctx.runtime_arch_file.data,
+                     (unsigned long long) boot_ctx.runtime_arch_file.size);
+      err = grub_ventoy_linux_export (prefix, "runtime_arch", runtime_arch_memname);
+    }
   if (err == GRUB_ERR_NONE)
     err = grub_ventoy_linux_build_meta_cpio (&boot_ctx, &meta_buf, &meta_size);
   if (err == GRUB_ERR_NONE)
@@ -921,6 +1042,16 @@ grub_cmd_vtlinux (grub_extcmd_context_t ctxt, int argc, char **args)
   grub_free (grub_ventoy_linux_last_meta_buf);
   grub_ventoy_linux_last_meta_buf = meta_buf;
   grub_ventoy_linux_last_meta_size = meta_size;
+  grub_free (grub_ventoy_linux_last_runtime_buf);
+  grub_ventoy_linux_last_runtime_buf = boot_ctx.runtime_file.data;
+  grub_ventoy_linux_last_runtime_size = boot_ctx.runtime_file.size;
+  boot_ctx.runtime_file.data = 0;
+  boot_ctx.runtime_file.size = 0;
+  grub_free (grub_ventoy_linux_last_runtime_arch_buf);
+  grub_ventoy_linux_last_runtime_arch_buf = boot_ctx.runtime_arch_file.data;
+  grub_ventoy_linux_last_runtime_arch_size = boot_ctx.runtime_arch_file.size;
+  boot_ctx.runtime_arch_file.data = 0;
+  boot_ctx.runtime_arch_file.size = 0;
   grub_free (runtime_alloc);
   grub_free (runtime_arch_alloc);
   grub_ventoy_linux_free_boot_ctx (&boot_ctx);
@@ -1148,6 +1279,12 @@ GRUB_MOD_FINI(ventoylinux)
   grub_free (grub_ventoy_linux_last_meta_buf);
   grub_ventoy_linux_last_meta_buf = 0;
   grub_ventoy_linux_last_meta_size = 0;
+  grub_free (grub_ventoy_linux_last_runtime_buf);
+  grub_ventoy_linux_last_runtime_buf = 0;
+  grub_ventoy_linux_last_runtime_size = 0;
+  grub_free (grub_ventoy_linux_last_runtime_arch_buf);
+  grub_ventoy_linux_last_runtime_arch_buf = 0;
+  grub_ventoy_linux_last_runtime_arch_size = 0;
   grub_unregister_extcmd (cmd_vtlinuxboot);
   grub_unregister_extcmd (cmd_vtlinux);
 }
