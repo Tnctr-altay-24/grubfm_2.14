@@ -1098,11 +1098,11 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
   boot_script = grub_xasprintf (
       "loopback %s ${%s_image}\n"
       "set root=(%s)\n"
-      "%s ${%s_kernel} ${%s_cmdline}\n"
+      "%s ${%s_kernel} %s\n"
       "%s ${%s_initrd} ${%s_runtime} ${%s_runtime_arch} ${%s_meta}\n"
       "boot",
       loop_name, prefix, loop_name,
-      linux_cmd, prefix, prefix,
+      linux_cmd, prefix, effective_cmdline,
       initrd_cmd, prefix, prefix, prefix, prefix);
   if (!boot_script)
     {
