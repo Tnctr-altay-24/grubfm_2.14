@@ -889,6 +889,7 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
   const char *runtime_arch;
   char *vtlinux_cmd;
   char *script;
+  char *boot_script;
   char *newbuf;
   grub_err_t err;
 
@@ -982,26 +983,35 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
         return grub_errno;
     }
 
-  script = grub_xasprintf (
-      "%s --script '"
+  script = grub_xasprintf ("%s %s", vtlinux_cmd, args[0]);
+  grub_free (vtlinux_cmd);
+  if (!script)
+    return grub_errno;
+
+  boot_script = grub_xasprintf (
       "loopback %s ${%s_image}\n"
       "set root=(%s)\n"
       "%s ${%s_kernel} ${%s_cmdline}\n"
       "%s ${%s_initrd} ${%s_runtime} ${%s_runtime_arch} ${%s_meta}\n"
-      "boot' %s",
-      vtlinux_cmd, loop_name, prefix, loop_name,
+      "boot",
+      loop_name, prefix, loop_name,
       linux_cmd, prefix, prefix,
-      initrd_cmd, prefix, prefix, prefix, prefix,
-      args[0]);
-  grub_free (vtlinux_cmd);
-  if (!script)
-    return grub_errno;
+      initrd_cmd, prefix, prefix, prefix, prefix);
+  if (!boot_script)
+    {
+      grub_free (script);
+      return grub_errno;
+    }
 
   grub_ventoy_linux_debug_string ("vtlinuxboot", "arg_image", args[0]);
   grub_ventoy_linux_debug_string ("vtlinuxboot", "runtime", runtime);
   grub_ventoy_linux_debug_string ("vtlinuxboot", "runtime_arch", runtime_arch);
   grub_ventoy_linux_debug_script ("vtlinuxboot", script);
+  grub_ventoy_linux_debug_script ("vtlinuxboot-post", boot_script);
   err = grub_parser_execute (script);
+  if (err == GRUB_ERR_NONE)
+    err = grub_parser_execute (boot_script);
+  grub_free (boot_script);
   grub_free (script);
   return err;
 }
