@@ -333,6 +333,8 @@ grub_ventoy_chain_init (ventoy_chain_head *chain, grub_file_t file,
   chunk_bytes = chunk_list->cur_chunk * sizeof (ventoy_img_chunk);
   chain->override_chunk_offset = chain->img_chunk_offset + chunk_bytes;
   chain->virt_chunk_offset = chain->override_chunk_offset;
+  chain->override_chunk_num = 0;
+  chain->virt_chunk_num = 0;
   return GRUB_ERR_NONE;
 }
 

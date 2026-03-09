@@ -178,6 +178,12 @@ enum
   };
 
 static grub_dl_t my_mod;
+static grub_uint64_t g_ventoy_last_read_pos;
+static grub_off_t g_ventoy_last_read_offset;
+static grub_uint64_t g_ventoy_last_read_dirent_pos;
+static grub_off_t g_ventoy_last_read_dirent_offset;
+static grub_uint64_t g_ventoy_last_file_dirent_pos;
+static grub_off_t g_ventoy_last_file_dirent_offset;
 
 
 static grub_err_t
@@ -251,6 +257,10 @@ read_node (grub_fshelp_node_t node, grub_off_t off, grub_size_t len, char *buf)
 			    off, toread, buf);
       if (err)
 	return err;
+      g_ventoy_last_read_pos =
+	((grub_disk_addr_t) grub_le_to_cpu32 (node->dirents[i].first_sector))
+	<< GRUB_ISO9660_LOG2_BLKSZ;
+      g_ventoy_last_read_offset = off;
       len -= toread;
       off += toread;
       buf += toread;
@@ -786,6 +796,8 @@ grub_iso9660_iterate_dir (grub_fshelp_node_t dir,
 
       if (read_node (dir, offset, sizeof (dirent), (char *) &dirent))
 	return 0;
+      g_ventoy_last_read_dirent_pos = g_ventoy_last_read_pos;
+      g_ventoy_last_read_dirent_offset = g_ventoy_last_read_offset;
 
       /* The end of the block, skip to the next one.  */
       if (!dirent.len)
@@ -969,6 +981,8 @@ grub_iso9660_iterate_dir (grub_fshelp_node_t dir,
 	  }
 	if (hook (ctx.filename, ctx.type, node, hook_data))
 	  {
+	    g_ventoy_last_file_dirent_pos = g_ventoy_last_read_dirent_pos;
+	    g_ventoy_last_file_dirent_offset = g_ventoy_last_read_dirent_offset;
 	    if (ctx.filename_alloc)
 	      grub_free (ctx.filename);
 	    return 1;
@@ -1042,12 +1056,25 @@ grub_iso9660_dir (grub_device_t device, const char *path,
   if (foundnode != &rootnode)
     grub_free (foundnode);
 
- fail:
+fail:
   grub_free (data);
 
   grub_dl_unref (my_mod);
 
   return grub_errno;
+}
+
+grub_uint64_t
+grub_iso9660_get_last_read_pos (grub_file_t file __attribute__ ((unused)))
+{
+  return g_ventoy_last_read_pos << GRUB_DISK_SECTOR_BITS;
+}
+
+grub_uint64_t
+grub_iso9660_get_last_file_dirent_pos (grub_file_t file __attribute__ ((unused)))
+{
+  return (g_ventoy_last_file_dirent_pos << GRUB_DISK_SECTOR_BITS)
+    + g_ventoy_last_file_dirent_offset;
 }
 
 
