@@ -36,4 +36,7 @@ patch_wim (struct vfat_file *file, void *data, size_t offset, size_t len);
 
 extern void set_wim_patch (struct wimboot_cmdline *cmd);
 
+extern void set_wim_patch_replace (const wchar_t *path,
+                                   struct vfat_file *vfile);
+
 #endif /* _WIMPATCH_H */

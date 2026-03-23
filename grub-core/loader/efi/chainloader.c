@@ -45,17 +45,74 @@
 GRUB_MOD_LICENSE ("GPLv3+");
 
 static grub_dl_t my_mod;
+static grub_efi_physical_address_t chainloader_address;
+static grub_efi_uintn_t chainloader_pages;
+static grub_efi_device_path_t *chainloader_file_path;
+
+static void
+grub_chainloader_debug_load_options (const char *scope,
+				     grub_efi_loaded_image_t *loaded_image)
+{
+  grub_size_t i;
+  grub_size_t n;
+  grub_size_t max_chars = 255;
+  char buf[256];
+  grub_efi_char16_t *opt;
+
+  if (!loaded_image || !loaded_image->load_options || !loaded_image->load_options_size)
+    {
+      grub_dprintf ("chain", "%s: no load options\n", scope);
+      return;
+    }
+
+  opt = (grub_efi_char16_t *) loaded_image->load_options;
+  n = loaded_image->load_options_size / sizeof (grub_efi_char16_t);
+  if (n > max_chars)
+    n = max_chars;
+
+  for (i = 0; i < n; i++)
+    {
+      grub_uint16_t ch = opt[i];
+      if (ch == 0)
+	break;
+      if (ch >= ' ' && ch <= '~')
+	buf[i] = (char) ch;
+      else
+	buf[i] = '?';
+    }
+  buf[i] = '\0';
+
+  grub_dprintf ("chain", "%s: load_options_ptr=%p load_options_size=%lu text=\"%s\"\n",
+		scope,
+		loaded_image->load_options,
+		(unsigned long) loaded_image->load_options_size,
+		buf);
+}
 
 static grub_err_t
 grub_chainloader_unload (void *context)
 {
   grub_efi_handle_t image_handle = (grub_efi_handle_t) context;
   grub_efi_loaded_image_t *loaded_image;
+  grub_efi_boot_services_t *b;
 
   grub_dprintf ("chain", "chainloader unload image_handle=%p\n", image_handle);
+  b = grub_efi_system_table->boot_services;
   loaded_image = grub_efi_get_loaded_image (image_handle);
   if (loaded_image != NULL)
     grub_free (loaded_image->load_options);
+
+  if (chainloader_file_path)
+    {
+      grub_free (chainloader_file_path);
+      chainloader_file_path = NULL;
+    }
+  if (chainloader_address)
+    {
+      b->free_pages (chainloader_address, chainloader_pages);
+      chainloader_address = 0;
+      chainloader_pages = 0;
+    }
 
   grub_efi_unload_image (image_handle);
 
@@ -71,8 +128,11 @@ grub_chainloader_boot (void *context)
   grub_efi_status_t status;
   grub_efi_uintn_t exit_data_size;
   grub_efi_char16_t *exit_data = NULL;
+  grub_efi_loaded_image_t *loaded_image = NULL;
 
   b = grub_efi_system_table->boot_services;
+  loaded_image = grub_efi_get_loaded_image (image_handle);
+  grub_chainloader_debug_load_options ("StartImage", loaded_image);
   grub_dprintf ("chain", "StartImage image_handle=%p\n", image_handle);
   status = grub_efi_start_image (image_handle, &exit_data_size, &exit_data);
   grub_dprintf ("chain", "StartImage status=0x%lx exit_data_size=%lu\n",
@@ -229,6 +289,7 @@ grub_cmd_chainloader (grub_command_t cmd __attribute__ ((unused)),
   grub_efi_uintn_t pages = 0;
   grub_efi_char16_t *cmdline = NULL;
   grub_efi_handle_t image_handle = NULL;
+  int fallback_dev_opened = 0;
 
   if (argc == 0)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("filename expected"));
@@ -236,6 +297,9 @@ grub_cmd_chainloader (grub_command_t cmd __attribute__ ((unused)),
   grub_dprintf ("chain", "chainloader argc=%d filename=%s\n", argc, filename);
 
   grub_dl_ref (my_mod);
+  chainloader_address = 0;
+  chainloader_pages = 0;
+  chainloader_file_path = NULL;
 
   b = grub_efi_system_table->boot_services;
 
@@ -243,8 +307,18 @@ grub_cmd_chainloader (grub_command_t cmd __attribute__ ((unused)),
   if (! file)
     goto fail;
 
-  /* Get the root device's device path.  */
-  dev = grub_device_open (0);
+  /*
+   * Build device path from the actual source device of FILE.
+   * Using current root may produce a mismatched device path when chainloading
+   * an image from a different device than $root.
+   */
+  dev = file->device;
+  if (dev == NULL)
+    {
+      dev = grub_device_open (0);
+      fallback_dev_opened = 1;
+    }
+
   if (dev == NULL)
     ;
   else if (dev->disk)
@@ -416,14 +490,23 @@ grub_cmd_chainloader (grub_command_t cmd __attribute__ ((unused)),
       loaded_image->load_options = cmdline;
       loaded_image->load_options_size = len;
       grub_dprintf ("chain", "load_options_size=%lu\n", (unsigned long) len);
+      grub_chainloader_debug_load_options ("chainloader", loaded_image);
     }
 
   grub_file_close (file);
-  grub_device_close (dev);
+  if (fallback_dev_opened && dev)
+    grub_device_close (dev);
 
-  /* We're finished with the source image buffer and file path now. */
-  b->free_pages (address, pages);
-  grub_free (file_path);
+  /*
+   * Keep source buffer and device path alive until unload.
+   * Some firmware implementations may still reference them around StartImage.
+   */
+  chainloader_address = address;
+  chainloader_pages = pages;
+  chainloader_file_path = file_path;
+  address = 0;
+  pages = 0;
+  file_path = NULL;
 
   grub_loader_set_ex (grub_chainloader_boot, grub_chainloader_unload, image_handle, 0);
   grub_dprintf ("chain", "chainloader setup complete image_handle=%p\n",
@@ -434,7 +517,7 @@ grub_cmd_chainloader (grub_command_t cmd __attribute__ ((unused)),
   grub_dprintf ("chain", "chainloader failed filename=%s grub_errno=%d\n",
 		filename ? filename : "(null)", grub_errno);
 
-  if (dev)
+  if (fallback_dev_opened && dev)
     grub_device_close (dev);
 
   if (file)

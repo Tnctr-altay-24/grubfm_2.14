@@ -103,7 +103,7 @@ grub_cmd_wimboot (grub_extcmd_context_t ctxt, int argc, char *argv[])
 {
   struct grub_arg_list *state = ctxt->state;
   struct wimboot_cmdline wimboot_cmd =
-      { 0, 0, 0, 0, 0, L"\\Windows\\System32", NULL, NULL, NULL, NULL };
+      { 0, 0, 0, 0, 0, 0, L"\\Windows\\System32", L"", NULL, NULL, NULL, NULL, NULL };
 
   if (argc < 1)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("filename expected"));

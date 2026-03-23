@@ -252,18 +252,18 @@ typedef int (*grub_env_printf_pf) (const char *fmt, ...);
 typedef struct
 {
   grub_uint32_t magic;
-  grub_uint32_t old_file_cnt;
+  char old_file_name[4][256];
+  grub_uint32_t old_name_cnt;
   grub_uint32_t new_file_virtual_id;
-  char old_file_name[4][64];
 } ventoy_grub_param_file_replace;
 
 typedef struct
 {
   grub_env_get_pf grub_env_get;
   grub_env_set_pf grub_env_set;
-  grub_env_printf_pf grub_env_printf;
   ventoy_grub_param_file_replace file_replace;
   ventoy_grub_param_file_replace img_replace[VTOY_MAX_CONF_REPLACE];
+  grub_env_printf_pf grub_env_printf;
 } ventoy_grub_param;
 
 #pragma pack()
@@ -281,8 +281,8 @@ enum
 
 enum
 {
-  GRUB_FILE_REPLACE_MAGIC = 0x56465250U,
-  GRUB_IMG_REPLACE_MAGIC = 0x56495250U
+  GRUB_FILE_REPLACE_MAGIC = 0x1258BEEFU,
+  GRUB_IMG_REPLACE_MAGIC = 0x1259BEEFU
 };
 
 ventoy_os_param *grub_ventoy_get_osparam (void);

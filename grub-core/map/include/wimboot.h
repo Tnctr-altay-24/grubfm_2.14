@@ -35,12 +35,15 @@ struct wimboot_cmdline
   grub_uint8_t gui;
   grub_uint8_t rawbcd;
   grub_uint8_t rawwim;
+  grub_uint8_t replace;
   unsigned int index;
   grub_uint8_t pause;
   wchar_t inject[256];
+  wchar_t replace_path[256];
   struct vfat_file *bootmgfw;
   struct vfat_file *bcd;
   struct vfat_file *bootsdi;
+  struct vfat_file *replace_vfile;
   const char *wim;
 };
 

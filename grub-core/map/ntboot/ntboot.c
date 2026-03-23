@@ -208,12 +208,20 @@ grub_cmd_ntboot (grub_extcmd_context_t ctxt,
   grub_dprintf ("ntbootdbg", "ntboot: patched bcd type=%d file=%p path=%s\n",
                 ntcmd.type, ntcmd.file, ntcmd.path ? ntcmd.path : "(null)");
 
-  struct wimboot_cmdline wimboot_cmd =
-      { 0, 1, 1, 0, 0, L"\\Windows\\System32", NULL, NULL, NULL, NULL };
+  struct wimboot_cmdline wimboot_cmd;
   grub_file_t bootmgr = 0;
   grub_file_t bootsdi = 0;
   grub_file_t bcd = 0;
   grub_file_t vhd_dll = 0;
+  const char *default_inject = "\\Windows\\System32";
+  grub_size_t inject_i;
+
+  grub_memset (&wimboot_cmd, 0, sizeof (wimboot_cmd));
+  for (inject_i = 0; default_inject[inject_i] && inject_i < 255; inject_i++)
+    wimboot_cmd.inject[inject_i] = (wchar_t) default_inject[inject_i];
+  wimboot_cmd.inject[inject_i] = 0;
+  wimboot_cmd.rawbcd = 1;
+  wimboot_cmd.rawwim = 1;
 
   if (state[NTBOOT_GUI].set)
     wimboot_cmd.gui = 1;

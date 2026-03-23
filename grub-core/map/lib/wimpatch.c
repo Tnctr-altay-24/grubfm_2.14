@@ -113,6 +113,20 @@ struct wim_patch_dir_entry {
   wchar_t name[ VDISK_NAME_LEN + 1 /* wNUL */ ];
 } __attribute__ (( packed ));
 
+struct wim_stream_entry {
+  uint64_t len;
+  uint64_t unused1;
+  struct wim_hash hash;
+  uint16_t name_len;
+} __attribute__ (( packed ));
+
+static uint8_t cmd_rawwim = 0;
+static unsigned int cmd_index = 0;
+static const wchar_t *cmd_inject = L"\\Windows\\System32";
+static const wchar_t *cmd_replace = NULL;
+static struct vfat_file *cmd_replace_vfile = NULL;
+static unsigned int cmd_generation = 1;
+
 /** A directory containing injected files */
 struct wim_patch_dir {
   /** Name */
@@ -139,6 +153,16 @@ struct wim_patch {
   struct wim_resource_header boot;
   /** Original boot index */
   uint32_t boot_index;
+  /** Patched uncompressed lookup table */
+  void *lookup_copy;
+  /** Patched uncompressed boot metadata */
+  void *boot_copy;
+  /** Replacement file */
+  struct vfat_file *replace_file;
+  /** Replacement target path */
+  const wchar_t *replace_path;
+  /** Configuration generation */
+  unsigned int generation;
   /** Directory containing injected files */
   struct wim_patch_dir dir;
   /** Patched regions */
@@ -181,6 +205,178 @@ static void wim_hash ( struct vfat_file *vfile, struct wim_hash *hash ) {
     sha1_update ( ctx, buf, len );
   }
   sha1_final ( ctx, hash->sha1 );
+}
+
+static struct wim_lookup_entry *
+wim_find_lookup_entry ( struct wim_resource_header *lookup,
+                        struct wim_lookup_entry *entries,
+                        struct wim_hash *hash ) {
+  unsigned int i;
+  unsigned int count = ( lookup->len / sizeof ( *entries ) );
+
+  for ( i = 0 ; i < count ; i++ ) {
+    if ( memcmp ( &entries[i].hash, hash, sizeof ( *hash ) ) == 0 )
+      return &entries[i];
+  }
+
+  return NULL;
+}
+
+static struct wim_lookup_entry *
+wim_find_meta_lookup_entry ( struct wim_header *header,
+                             struct wim_lookup_entry *entries ) {
+  unsigned int i;
+  unsigned int count = ( header->lookup.len / sizeof ( *entries ) );
+  unsigned int index = 0;
+
+  for ( i = 0 ; i < count ; i++ ) {
+    if ( entries[i].resource.zlen__flags & WIM_RESHDR_METADATA ) {
+      index++;
+      if ( index == header->boot_index )
+        return &entries[i];
+    }
+  }
+
+  return NULL;
+}
+
+static int
+wim_prepare_replace ( struct wim_patch *patch ) {
+  struct wim_lookup_entry *lookup_copy;
+  struct wim_lookup_entry *replace_lookup;
+  struct wim_lookup_entry *meta_lookup;
+  struct wim_directory_entry direntry;
+  struct wim_directory_entry *copy_entry;
+  struct wim_security_header security;
+  struct wim_hash old_hash;
+  struct wim_hash new_hash;
+  size_t dir_offset;
+  size_t replace_offset;
+  size_t meta_len;
+  size_t lookup_len;
+  void *boot_copy;
+  void *meta_data;
+  int rc;
+
+  if ( ! patch->replace_file || ! patch->replace_path )
+    return 0;
+
+  meta_len = patch->boot.len;
+  lookup_len = patch->lookup.len;
+
+  boot_copy = malloc ( meta_len );
+  lookup_copy = malloc ( lookup_len );
+  if ( ! boot_copy || ! lookup_copy ) {
+    free ( boot_copy );
+    free ( lookup_copy );
+    return -1;
+  }
+
+  if ( ( rc = wim_read ( patch->file, &patch->header, &patch->boot,
+                         boot_copy, 0, meta_len ) ) != 0 )
+    goto err;
+  if ( ( rc = wim_read ( patch->file, &patch->header, &patch->lookup,
+                         lookup_copy, 0, lookup_len ) ) != 0 )
+    goto err;
+
+  if ( ( rc = wim_path ( patch->file, &patch->header, &patch->boot,
+                         patch->replace_path, &dir_offset,
+                         &direntry ) ) != 0 )
+    goto err;
+
+  memset ( &old_hash, 0, sizeof ( old_hash ) );
+  if ( memcmp ( &direntry.hash, &old_hash, sizeof ( old_hash ) ) == 0 ) {
+    struct wim_stream_entry *stream =
+      ( (struct wim_stream_entry *) ( ( ( char * ) boot_copy ) +
+                                      dir_offset + direntry.len ) );
+    unsigned int i;
+    for ( i = 0 ; i < direntry.streams ; i++ ) {
+      if ( stream->name_len == 0 ) {
+        memcpy ( &old_hash, &stream->hash, sizeof ( old_hash ) );
+        break;
+      }
+      stream = ( (struct wim_stream_entry *)
+                 ( ( ( char * ) stream ) + stream->len ) );
+    }
+  } else {
+    memcpy ( &old_hash, &direntry.hash, sizeof ( old_hash ) );
+  }
+
+  replace_lookup = wim_find_lookup_entry ( &patch->lookup, lookup_copy, &old_hash );
+  if ( ! replace_lookup ) {
+    rc = -1;
+    goto err;
+  }
+
+  wim_hash ( patch->replace_file, &new_hash );
+  replace_offset = wim_align ( patch->file->len );
+  replace_lookup->resource.offset = replace_offset;
+  replace_lookup->resource.len = patch->replace_file->len;
+  replace_lookup->resource.zlen__flags = patch->replace_file->len;
+  replace_lookup->refcnt = 1;
+  memcpy ( &replace_lookup->hash, &new_hash, sizeof ( new_hash ) );
+
+  meta_data = boot_copy;
+  copy_entry = ( (struct wim_directory_entry *) ( ( ( char * ) meta_data ) + dir_offset ) );
+  memcpy ( &copy_entry->hash, &new_hash, sizeof ( new_hash ) );
+  if ( copy_entry->streams ) {
+    struct wim_stream_entry *stream =
+      ( (struct wim_stream_entry *) ( ( ( char * ) copy_entry ) + copy_entry->len ) );
+    unsigned int i;
+    for ( i = 0 ; i < copy_entry->streams ; i++ ) {
+      if ( memcmp ( &stream->hash, &old_hash, sizeof ( old_hash ) ) == 0 )
+        memcpy ( &stream->hash, &new_hash, sizeof ( new_hash ) );
+      stream = ( (struct wim_stream_entry *)
+                 ( ( ( char * ) stream ) + stream->len ) );
+    }
+  }
+
+  memcpy ( &security, boot_copy, sizeof ( security ) );
+  if ( security.len > 0 )
+    meta_data = ( ( char * ) boot_copy ) +
+      ( ( security.len + sizeof ( uint64_t ) - 1 ) & ~( sizeof ( uint64_t ) - 1 ) );
+  else
+    meta_data = ( ( char * ) boot_copy ) + 8;
+
+  /* Best effort: keep any secondary references in sync. */
+  {
+    struct wim_directory_entry *entry = meta_data;
+    while ( entry->len ) {
+      if ( memcmp ( &entry->hash, &old_hash, sizeof ( old_hash ) ) == 0 )
+        memcpy ( &entry->hash, &new_hash, sizeof ( new_hash ) );
+      entry = ( (struct wim_directory_entry *) ( ( ( char * ) entry ) + entry->len ) );
+    }
+  }
+
+  patch->boot.offset = wim_align ( replace_offset + patch->replace_file->len );
+  patch->boot.zlen__flags = ( meta_len | WIM_RESHDR_METADATA );
+  patch->header.boot = patch->boot;
+
+  patch->lookup.offset = wim_align ( patch->boot.offset + meta_len );
+  patch->lookup.len = lookup_len;
+  patch->lookup.zlen__flags = lookup_len;
+  patch->header.lookup = patch->lookup;
+
+  meta_lookup = wim_find_meta_lookup_entry ( &patch->header, lookup_copy );
+  if ( meta_lookup ) {
+    memcpy ( &meta_lookup->resource, &patch->boot, sizeof ( patch->boot ) );
+    {
+      uint8_t ctx[SHA1_CTX_SIZE];
+      sha1_init ( ctx );
+      sha1_update ( ctx, boot_copy, meta_len );
+      sha1_final ( ctx, meta_lookup->hash.sha1 );
+    }
+  }
+
+  patch->replace_file = patch->replace_file;
+  patch->boot_copy = boot_copy;
+  patch->lookup_copy = lookup_copy;
+  return 0;
+
+ err:
+  free ( boot_copy );
+  free ( lookup_copy );
+  return rc;
 }
 
 /**
@@ -315,6 +511,11 @@ static int wim_patch_lookup_copy ( struct wim_patch *patch,
            void *data, size_t offset, size_t len ) {
   int rc;
 
+  if ( patch->lookup_copy ) {
+    memcpy ( data, ( ( ( char * ) patch->lookup_copy ) + offset ), len );
+    return 0;
+  }
+
   /* Read original lookup table */
   if ( ( rc = wim_read ( patch->file, &patch->header, &patch->lookup,
              data, offset, len ) ) != 0 )
@@ -403,6 +604,11 @@ static int wim_patch_boot_copy ( struct wim_patch *patch,
          struct wim_patch_region *region __unused,
          void *data, size_t offset, size_t len ) {
   int rc;
+
+  if ( patch->boot_copy ) {
+    memcpy ( data, ( ( ( char * ) patch->boot_copy ) + offset ), len );
+    return 0;
+  }
 
   /* Read original boot metadata */
   if ( ( rc = wim_read ( patch->file, &patch->header, &patch->boot,
@@ -656,11 +862,15 @@ static int wim_construct_patch ( struct vfat_file *file,
   struct vfat_file *vfile;
   size_t offset;
   unsigned int injected = 0;
+  int replace = 0;
   unsigned int i;
   int rc;
 
   /* Initialise patch */
   memset ( patch, 0, sizeof ( *patch ) );
+  patch->replace_file = cmd_replace_vfile;
+  patch->replace_path = cmd_replace;
+  patch->generation = cmd_generation;
   patch->file = file;
   printf ( "...patching WIM %s\n", file->name );
 
@@ -698,6 +908,30 @@ static int wim_construct_patch ( struct vfat_file *file,
   /* Update boot index in patched header, if applicable */
   if ( boot_index )
     patch->header.boot_index = boot_index;
+
+  replace = ( patch->replace_file && patch->replace_path );
+  if ( replace ) {
+    if ( ( rc = wim_prepare_replace ( patch ) ) != 0 )
+      return rc;
+
+    offset = wim_align ( file->len );
+    offset = wim_construct_region ( &regions->file[0], patch->replace_file->name,
+            patch->replace_file, offset, patch->replace_file->len,
+            wim_patch_file );
+    lookup->offset = offset = wim_align ( offset );
+    offset = wim_construct_region ( &regions->lookup.copy, "lookup.copy",
+            NULL, offset, patch->lookup.len,
+            wim_patch_lookup_copy );
+    boot->offset = offset = wim_align ( offset );
+    offset = wim_construct_region ( &regions->boot.copy, "boot.copy",
+            NULL, offset, patch->boot.len,
+            wim_patch_boot_copy );
+    file->xlen = offset;
+    printf ( "...patching WIM replace length 0x%lx->0x%lx\n",
+             file->len, file->xlen );
+    if ( ! inject )
+      return 0;
+  }
 
   /* Do nothing more if injection is disabled */
   if ( ! inject )
@@ -772,10 +1006,6 @@ static int wim_construct_patch ( struct vfat_file *file,
   return 0;
 }
 
-static uint8_t cmd_rawwim = 0;
-static unsigned int cmd_index = 0;
-static const wchar_t *cmd_inject = L"\\Windows\\System32";
-
 /**
  * Patch WIM file
  *
@@ -801,7 +1031,7 @@ void patch_wim ( struct vfat_file *file, void *data, size_t offset,
     return;
 
   /* Update cached patch if required */
-  if ( file != patch->file ) {
+  if ( ( file != patch->file ) || ( patch->generation != cmd_generation ) ) {
     if ( ( rc = wim_construct_patch ( file, boot_index, inject,
               cmd_inject, patch ) ) != 0 ) {
       grub_pause_fatal ( "Could not patch WIM %s\n", file->name );
@@ -827,6 +1057,16 @@ void set_wim_patch (struct wimboot_cmdline *cmd)
   cmd_index = cmd->index;
   cmd_rawwim = cmd->rawwim;
   cmd_inject = cmd->inject;
+  cmd_replace = cmd->replace ? cmd->replace_path : NULL;
+  cmd_replace_vfile = cmd->replace ? cmd->replace_vfile : NULL;
+  cmd_generation++;
+}
+
+void set_wim_patch_replace (const wchar_t *path, struct vfat_file *vfile)
+{
+  cmd_replace = path;
+  cmd_replace_vfile = vfile;
+  cmd_generation++;
 }
 
 #if __GNUC__ >= 9

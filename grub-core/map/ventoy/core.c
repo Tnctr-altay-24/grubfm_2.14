@@ -43,6 +43,18 @@ grub_ventoy_refresh_osparam_checksum (ventoy_os_param *param)
   param->chksum = (grub_uint8_t) (0x100 - chksum);
 }
 
+static int
+grub_ventoy_env_is_one (const char *name)
+{
+  const char *val;
+
+  if (!name)
+    return 0;
+
+  val = grub_env_get (name);
+  return (val && val[0] == '1' && val[1] == '\0');
+}
+
 static const struct grub_arg_option options_vtchain[] =
   {
     {"var", 'v', 0, N_("Environment variable that receives mem:ADDR:size:LEN."),
@@ -376,6 +388,25 @@ grub_ventoy_build_chain (grub_file_t file, grub_uint8_t chain_type,
   grub_memcpy ((char *) chain + chain->img_chunk_offset, chunk_list.chunk, chunk_bytes);
   chain->os_param.vtoy_reserved[2] = chain_type;
   chain->os_param.vtoy_reserved[3] = iso_format;
+
+  /*
+   * Keep compatibility with original Ventoy os_param contract:
+   *   [4] windows cd prompt flag
+   *   [5] linux remount flag
+   *   [6] vlnk flag (unsupported in this implementation -> 0)
+   *   [7..10] disk signature mirror for vlnk consumers
+   */
+  chain->os_param.vtoy_reserved[4] = 0;
+  if (chain_type == ventoy_chain_windows && grub_ventoy_env_is_one ("VTOY_WINDOWS_CD_PROMPT"))
+    chain->os_param.vtoy_reserved[4] = 1;
+
+  chain->os_param.vtoy_reserved[5] = 0;
+  if (grub_ventoy_env_is_one ("VTOY_LINUX_REMOUNT"))
+    chain->os_param.vtoy_reserved[5] = 1;
+
+  chain->os_param.vtoy_reserved[6] = 0;
+  grub_memcpy (chain->os_param.vtoy_reserved + 7, chain->os_param.vtoy_disk_signature, 4);
+
   grub_ventoy_refresh_osparam_checksum (&chain->os_param);
 
   grub_ventoy_free_chunks (&chunk_list);
