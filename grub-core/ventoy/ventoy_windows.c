@@ -31,6 +31,10 @@ static grub_extcmd_t cmd_vtwimboot;
 static grub_extcmd_t cmd_vtchainloadwin;
 static grub_extcmd_t cmd_vt_windows_reset;
 static grub_extcmd_t cmd_vt_wim_check_bootable;
+static grub_extcmd_t cmd_vt_windows_collect_wim_patch;
+static grub_extcmd_t cmd_vt_windows_locate_wim_patch;
+static grub_extcmd_t cmd_vt_windows_count_wim_patch;
+static grub_extcmd_t cmd_vt_dump_wim_patch;
 static void *grub_ventoy_windows_last_chain_buf;
 static grub_size_t grub_ventoy_windows_last_chain_size;
 static void *grub_ventoy_windows_last_rtdata_buf;
@@ -3199,6 +3203,81 @@ grub_cmd_vt_wim_check_bootable (grub_extcmd_context_t ctxt __attribute__ ((unuse
 }
 
 static grub_err_t
+grub_cmd_vt_windows_count_wim_patch (grub_extcmd_context_t ctxt __attribute__ ((unused)),
+                                     int argc, char **args)
+{
+  char buf[32];
+
+  if (argc == 1)
+    {
+      grub_snprintf (buf, sizeof (buf), "%u",
+                     (unsigned) grub_ventoy_windows_patch_count);
+      grub_env_set (args[0], buf);
+      grub_env_export (args[0]);
+    }
+
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
+grub_cmd_vt_dump_wim_patch (grub_extcmd_context_t ctxt __attribute__ ((unused)),
+                            int argc __attribute__ ((unused)),
+                            char **args __attribute__ ((unused)))
+{
+  int i = 0;
+  struct grub_ventoy_windows_patch *node;
+
+  for (node = grub_ventoy_windows_patch_head; node; node = node->next)
+    grub_printf ("%d %s [%s]\n", i++, node->path, node->valid ? "SUCCESS" : "FAIL");
+
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
+grub_cmd_vt_windows_collect_wim_patch (grub_extcmd_context_t ctxt __attribute__ ((unused)),
+                                       int argc, char **args)
+{
+  const char *full;
+  const char *right;
+  grub_size_t loop_len;
+  char loopname[64];
+
+  if (argc != 2)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, "usage: vt_windows_collect_wim_patch {bcd|file} {path}");
+
+  if (grub_strcmp (args[0], "bcd") == 0)
+    {
+      full = args[1];
+      if (!full || full[0] != '(')
+        return grub_error (GRUB_ERR_BAD_ARGUMENT, "bcd mode expects path in (loop)/file form");
+
+      right = grub_strchr (full, ')');
+      if (!right || right == full + 1 || !right[1])
+        return grub_error (GRUB_ERR_BAD_ARGUMENT, "invalid bcd path format");
+
+      loop_len = (grub_size_t) (right - (full + 1));
+      if (loop_len >= sizeof (loopname))
+        return grub_error (GRUB_ERR_BAD_ARGUMENT, "loop name too long");
+
+      grub_memcpy (loopname, full + 1, loop_len);
+      loopname[loop_len] = '\0';
+      return grub_ventoy_windows_collect_bcd_patches (loopname, right + 1);
+    }
+
+  return grub_ventoy_windows_add_patch (args[1]);
+}
+
+static grub_err_t
+grub_cmd_vt_windows_locate_wim_patch (grub_extcmd_context_t ctxt __attribute__ ((unused)),
+                                      int argc, char **args)
+{
+  if (argc < 1)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, "loop name expected");
+
+  return grub_ventoy_windows_validate_patches (args[0]);
+}
+
+static grub_err_t
 grub_cmd_vtwindows (grub_extcmd_context_t ctxt, int argc, char **args)
 {
   struct grub_arg_list *state = ctxt ? ctxt->state : 0;
@@ -3485,6 +3564,18 @@ GRUB_MOD_INIT(ventoywindows)
   cmd_vt_wim_check_bootable = grub_register_extcmd ("vt_wim_check_bootable",
                                                     grub_cmd_vt_wim_check_bootable, 0,
                                                     "", "", 0);
+  cmd_vt_windows_collect_wim_patch = grub_register_extcmd (
+      "vt_windows_collect_wim_patch", grub_cmd_vt_windows_collect_wim_patch, 0,
+      "", "", 0);
+  cmd_vt_windows_locate_wim_patch = grub_register_extcmd (
+      "vt_windows_locate_wim_patch", grub_cmd_vt_windows_locate_wim_patch, 0,
+      "", "", 0);
+  cmd_vt_windows_count_wim_patch = grub_register_extcmd (
+      "vt_windows_count_wim_patch", grub_cmd_vt_windows_count_wim_patch, 0,
+      "", "", 0);
+  cmd_vt_dump_wim_patch = grub_register_extcmd (
+      "vt_dump_wim_patch", grub_cmd_vt_dump_wim_patch, 0,
+      "", "", 0);
 }
 
 GRUB_MOD_FINI(ventoywindows)
@@ -3519,6 +3610,10 @@ GRUB_MOD_FINI(ventoywindows)
   grub_ventoy_windows_last_launch_path = 0;
   grub_free (grub_ventoy_windows_last_launch_name);
   grub_ventoy_windows_last_launch_name = 0;
+  grub_unregister_extcmd (cmd_vt_dump_wim_patch);
+  grub_unregister_extcmd (cmd_vt_windows_count_wim_patch);
+  grub_unregister_extcmd (cmd_vt_windows_locate_wim_patch);
+  grub_unregister_extcmd (cmd_vt_windows_collect_wim_patch);
   grub_unregister_extcmd (cmd_vt_wim_check_bootable);
   grub_unregister_extcmd (cmd_vt_windows_reset);
   grub_unregister_extcmd (cmd_vtwindows);
