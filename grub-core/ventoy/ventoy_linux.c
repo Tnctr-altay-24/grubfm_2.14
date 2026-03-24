@@ -871,10 +871,30 @@ grub_ventoy_linux_open_image (const char *name)
 }
 
 static char *
+grub_ventoy_linux_try_runtime_path (const char *path)
+{
+  grub_file_t file;
+
+  if (!path || !*path)
+    return 0;
+
+  file = grub_file_open (path, GRUB_FILE_TYPE_GET_SIZE);
+  if (file)
+    {
+      grub_file_close (file);
+      return grub_strdup (path);
+    }
+
+  grub_errno = GRUB_ERR_NONE;
+  return 0;
+}
+
+static char *
 grub_ventoy_linux_probe_runtime_path (grub_file_t image, const char *filename)
 {
+  const char *base;
   char *path;
-  grub_file_t file;
+  char *found;
 
   if (!image || !image->device || !image->device->disk || !image->device->disk->name || !filename)
     return 0;
@@ -883,28 +903,56 @@ grub_ventoy_linux_probe_runtime_path (grub_file_t image, const char *filename)
   if (!path)
     return 0;
 
-  file = grub_file_open (path, GRUB_FILE_TYPE_GET_SIZE);
-  if (file)
-    {
-      grub_file_close (file);
-      return path;
-    }
-  grub_errno = GRUB_ERR_NONE;
+  found = grub_ventoy_linux_try_runtime_path (path);
   grub_free (path);
+  if (found)
+    return found;
+
+  base = grub_env_get ("vtoy_path");
+  if (base && *base)
+    {
+      path = grub_xasprintf ("%s/%s", base, filename);
+      if (!path)
+        return 0;
+      found = grub_ventoy_linux_try_runtime_path (path);
+      grub_free (path);
+      if (found)
+        return found;
+    }
+
+  base = grub_env_get ("vtoy_efi_part");
+  if (base && *base)
+    {
+      path = grub_xasprintf ("%s/ventoy/%s", base, filename);
+      if (!path)
+        return 0;
+      found = grub_ventoy_linux_try_runtime_path (path);
+      grub_free (path);
+      if (found)
+        return found;
+    }
+
+  base = grub_env_get ("vtoy_iso_part");
+  if (base && *base)
+    {
+      path = grub_xasprintf ("%s/ventoy/%s", base, filename);
+      if (!path)
+        return 0;
+      found = grub_ventoy_linux_try_runtime_path (path);
+      grub_free (path);
+      if (found)
+        return found;
+    }
 
 #ifndef GRUB_MACHINE_EFI
   path = grub_xasprintf ("(ventoydisk)/ventoy/%s", filename);
   if (!path)
     return 0;
 
-  file = grub_file_open (path, GRUB_FILE_TYPE_GET_SIZE);
-  if (file)
-    {
-      grub_file_close (file);
-      return path;
-    }
-  grub_errno = GRUB_ERR_NONE;
+  found = grub_ventoy_linux_try_runtime_path (path);
   grub_free (path);
+  if (found)
+    return found;
 #endif
 
   return 0;
