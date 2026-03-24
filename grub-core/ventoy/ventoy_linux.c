@@ -678,6 +678,15 @@ grub_ventoy_linux_autodetect_entry (const char *image, const char *loop_name,
   if (!image || !loop_name || !out_kernel || !out_initrd || !out_cmdline)
     return 0;
 
+  loop_cmd = grub_xasprintf ("loopback -d %s", loop_name);
+  if (loop_cmd)
+    {
+      grub_parser_execute (loop_cmd);
+      grub_errno = GRUB_ERR_NONE;
+      grub_free (loop_cmd);
+      loop_cmd = 0;
+    }
+
   loop_cmd = grub_xasprintf ("loopback %s %s", loop_name, image);
   if (!loop_cmd)
     return 0;
@@ -1807,12 +1816,13 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
     }
 
   boot_script = grub_xasprintf (
+      "loopback -d %s\n"
       "loopback %s ${%s_image}\n"
       "set root=(%s)\n"
       "%s ${%s_kernel} %s\n"
       "%s ${%s_initrd} ${%s_runtime} ${%s_runtime_arch} ${%s_meta}\n"
       "boot",
-      loop_name, prefix, loop_name,
+      loop_name, loop_name, prefix, loop_name,
       linux_cmd, prefix, effective_cmdline,
       initrd_cmd, prefix, prefix, prefix, prefix);
   if (!boot_script)
