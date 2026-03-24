@@ -3467,11 +3467,11 @@ fail:
 GRUB_MOD_INIT(ventoywindows)
 {
   grub_ventoy_vhd_boot_init ();
-  cmd_vtwindows = grub_register_extcmd ("vtwindows", grub_cmd_vtwindows, 0,
+  cmd_vtwindows = grub_register_extcmd ("vt_windows_chain_data", grub_cmd_vtwindows, 0,
                                         N_("Probe a Windows ISO/WIM image and export Ventoy-style metadata."),
                                         "",
                                         options_vtwindows);
-  cmd_vtwimboot = grub_register_extcmd ("vtwimboot", grub_cmd_vtwimboot, 0,
+  cmd_vtwimboot = grub_register_extcmd ("vt_windows_wimboot_data", grub_cmd_vtwimboot, 0,
                                         N_("Prepare Ventoy Windows chain/runtime data and report the pending EFI consumer step."),
                                         "",
                                         options_vtwindows);

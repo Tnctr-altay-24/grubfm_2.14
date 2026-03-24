@@ -1180,7 +1180,7 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
   if (!effective_cmdline)
     return grub_errno;
 
-  vtlinux_cmd = grub_xasprintf ("vtlinux --var %s --kernel %s --initrd %s",
+  vtlinux_cmd = grub_xasprintf ("vt_linux_chain_data --var %s --kernel %s --initrd %s",
                                 prefix, kernel, initrd);
   if (!vtlinux_cmd)
     {
@@ -1314,7 +1314,7 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
 GRUB_MOD_INIT(ventoylinux)
 {
   cmd_vtlinux = grub_register_extcmd (
-      "vtlinux", grub_cmd_vtlinux, 0,
+      "vt_linux_chain_data", grub_cmd_vtlinux, 0,
       N_("[--var PREFIX] [--kernel PATH] [--initrd PATH] [--cmdline STRING] [--persistence FILE] [--inject FILE] [--template FILE] [--runtime FILE] [--runtime-arch FILE] [--format iso9660|udf] [--script COMMANDS] FILE"),
       N_("Build a ventoy Linux chain blob and export scriptable environment variables."),
       options_vtlinux);
