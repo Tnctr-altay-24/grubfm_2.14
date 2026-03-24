@@ -18,14 +18,315 @@
 #include "ventoy_vfat.h"
 #include "ventoy_wim.h"
 #include "ventoy_wimpatch.h"
+#include "ventoy_def.h"
 
-struct grub_ventoy_wim_stream_entry
+static struct grub_ventoy_windows_patch *grub_ventoy_wimpatch_patch_head;
+static grub_uint32_t grub_ventoy_wimpatch_patch_count;
+static grub_uint32_t grub_ventoy_wimpatch_valid_patch_count;
+
+static struct grub_ventoy_windows_patch *
+ventoy_wimpatch_find (const char *path)
 {
-  grub_uint64_t len;
-  grub_uint64_t unused1;
-  struct wim_hash hash;
-  grub_uint16_t name_len;
-} GRUB_PACKED;
+  struct grub_ventoy_windows_patch *node;
+  grub_size_t len;
+
+  if (!path)
+    return 0;
+
+  len = grub_strlen (path);
+  for (node = grub_ventoy_wimpatch_patch_head; node; node = node->next)
+    if (node->pathlen == len && grub_strcmp (node->path, path) == 0)
+      return node;
+
+  return 0;
+}
+
+static int
+ventoy_wimpatch_is_wim_file (const char *loopname, const char *path)
+{
+  grub_file_t file;
+  char *full;
+  char sig[8];
+
+  full = grub_xasprintf ("(%s)%s", loopname, path);
+  if (!full)
+    return 0;
+
+  file = grub_file_open (full, GRUB_FILE_TYPE_GET_SIZE);
+  grub_free (full);
+  if (!file)
+    return 0;
+
+  grub_memset (sig, 0, sizeof (sig));
+  grub_file_read (file, sig, sizeof (sig));
+  grub_file_close (file);
+
+  return (grub_memcmp (sig, "MSWIM\0\0\0", 8) == 0);
+}
+
+void
+grub_ventoy_wimpatch_reset (void)
+{
+  struct grub_ventoy_windows_patch *node;
+  struct grub_ventoy_windows_patch *next;
+
+  for (node = grub_ventoy_wimpatch_patch_head; node; node = next)
+    {
+      next = node->next;
+      grub_free (node->patched_wim_buf);
+      grub_free (node);
+    }
+
+  grub_ventoy_wimpatch_patch_head = 0;
+  grub_ventoy_wimpatch_patch_count = 0;
+  grub_ventoy_wimpatch_valid_patch_count = 0;
+}
+
+void
+grub_ventoy_wimpatch_clear_patched_wims (void)
+{
+  struct grub_ventoy_windows_patch *node;
+
+  for (node = grub_ventoy_wimpatch_patch_head; node; node = node->next)
+    {
+      grub_free (node->patched_wim_buf);
+      node->patched_wim_buf = 0;
+      node->patched_wim_size = 0;
+      node->patched = 0;
+    }
+}
+
+grub_uint32_t
+grub_ventoy_wimpatch_total_count (void)
+{
+  return grub_ventoy_wimpatch_patch_count;
+}
+
+grub_uint32_t
+grub_ventoy_wimpatch_valid_count (void)
+{
+  return grub_ventoy_wimpatch_valid_patch_count;
+}
+
+grub_ventoy_windows_patch *
+grub_ventoy_wimpatch_head (void)
+{
+  return grub_ventoy_wimpatch_patch_head;
+}
+
+grub_uint32_t
+grub_ventoy_wimpatch_patched_count (void)
+{
+  struct grub_ventoy_windows_patch *node;
+  grub_uint32_t count = 0;
+
+  for (node = grub_ventoy_wimpatch_patch_head; node; node = node->next)
+    if (node->valid && node->patched && node->patched_wim_buf && node->patched_wim_size)
+      count++;
+
+  return count;
+}
+
+grub_ventoy_windows_patch *
+grub_ventoy_wimpatch_first_patched (void)
+{
+  struct grub_ventoy_windows_patch *node;
+
+  for (node = grub_ventoy_wimpatch_patch_head; node; node = node->next)
+    if (node->valid && node->patched && node->patched_wim_buf && node->patched_wim_size)
+      return node;
+
+  return 0;
+}
+
+char *
+grub_ventoy_wimpatch_extract_device_prefix (const char *fullpath)
+{
+  const char *end;
+  grub_size_t len;
+  char *prefix;
+
+  if (!fullpath || fullpath[0] != '(')
+    return 0;
+
+  end = grub_strchr (fullpath, ')');
+  if (!end)
+    return 0;
+
+  len = (grub_size_t) (end - fullpath + 1);
+  prefix = grub_malloc (len + 1);
+  if (!prefix)
+    return 0;
+
+  grub_memcpy (prefix, fullpath, len);
+  prefix[len] = '\0';
+  return prefix;
+}
+
+grub_err_t
+grub_ventoy_wimpatch_add (const char *path)
+{
+  struct grub_ventoy_windows_patch *node;
+
+  if (!path || !*path)
+    return GRUB_ERR_NONE;
+
+  if (ventoy_wimpatch_find (path))
+    return GRUB_ERR_NONE;
+
+  node = grub_zalloc (sizeof (*node));
+  if (!node)
+    return grub_errno;
+
+  node->pathlen = grub_snprintf (node->path, sizeof (node->path), "%s", path);
+  node->valid = 1;
+  node->next = grub_ventoy_wimpatch_patch_head;
+  grub_ventoy_wimpatch_patch_head = node;
+  grub_ventoy_wimpatch_patch_count++;
+  return GRUB_ERR_NONE;
+}
+
+grub_err_t
+grub_ventoy_wimpatch_collect_bcd (const char *loopname, const char *bcd_path)
+{
+  grub_file_t file;
+  char *full = 0;
+  char *buf = 0;
+  grub_uint64_t file_size;
+  grub_size_t i;
+  grub_size_t j;
+  grub_size_t k;
+  grub_uint64_t magic;
+  grub_uint8_t byte;
+  char path[256];
+  char c;
+
+  if (!loopname || !bcd_path)
+    return GRUB_ERR_NONE;
+
+  full = grub_xasprintf ("(%s)%s", loopname, bcd_path);
+  if (!full)
+    return grub_errno;
+
+  file = grub_file_open (full, GRUB_FILE_TYPE_GET_SIZE);
+  grub_free (full);
+  if (!file)
+    {
+      grub_errno = GRUB_ERR_NONE;
+      return GRUB_ERR_NONE;
+    }
+
+  file_size = grub_file_size (file);
+  buf = grub_malloc (file_size + 8);
+  if (!buf)
+    {
+      grub_file_close (file);
+      return grub_errno;
+    }
+
+  grub_memset (buf, 0, file_size + 8);
+  grub_file_read (file, buf, file_size);
+  grub_file_close (file);
+
+  for (i = 0; i + 8 < file_size; i++)
+    {
+      if ((unsigned char) buf[i + 8] != 0)
+        continue;
+
+      magic = *(grub_uint64_t *) (buf + i);
+      if (magic != 0x006D00690077002EULL &&
+          magic != 0x004D00490057002EULL &&
+          magic != 0x006D00690057002EULL)
+        continue;
+
+      for (j = i; j > 0; j -= 2)
+        if (*(grub_uint16_t *) (buf + j) == 0)
+          break;
+
+      if (j == 0)
+        continue;
+
+      byte = (grub_uint8_t) (*(grub_uint16_t *) (buf + j + 2));
+      if (byte != '/' && byte != '\\')
+        continue;
+
+      for (k = 0, j += 2; k < sizeof (path) - 1 && j < i + 8; j += 2)
+        {
+          byte = (grub_uint8_t) (*(grub_uint16_t *) (buf + j));
+          c = (char) byte;
+          if (byte > '~' || byte < ' ')
+            break;
+          if (c == '\\')
+            c = '/';
+          path[k++] = c;
+        }
+      path[k] = '\0';
+      if (k > 0)
+        grub_ventoy_wimpatch_add (path);
+    }
+
+  grub_free (buf);
+  return GRUB_ERR_NONE;
+}
+
+grub_err_t
+grub_ventoy_wimpatch_validate (const char *loopname)
+{
+  struct grub_ventoy_windows_patch *node;
+
+  grub_ventoy_wimpatch_valid_patch_count = 0;
+  for (node = grub_ventoy_wimpatch_patch_head; node; node = node->next)
+    {
+      grub_free (node->patched_wim_buf);
+      node->patched_wim_buf = 0;
+      node->patched_wim_size = 0;
+      node->patched = 0;
+      node->valid = ventoy_wimpatch_is_wim_file (loopname, node->path);
+      if (node->valid)
+        grub_ventoy_wimpatch_valid_patch_count++;
+    }
+
+  return GRUB_ERR_NONE;
+}
+
+grub_err_t
+grub_ventoy_wimpatch_build_blob (void **blob, grub_size_t *blob_size)
+{
+  struct grub_ventoy_windows_patch_blob_header *header;
+  struct grub_ventoy_windows_patch_blob_record *record;
+  struct grub_ventoy_windows_patch *node;
+  grub_size_t size;
+  grub_uint32_t index;
+
+  if (!blob || !blob_size)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, "invalid wimpatch blob arguments");
+
+  *blob = 0;
+  *blob_size = 0;
+
+  size = sizeof (*header) + grub_ventoy_wimpatch_patch_count * sizeof (*record);
+  header = grub_zalloc (size);
+  if (!header)
+    return grub_errno;
+
+  header->total_patch_count = grub_ventoy_wimpatch_patch_count;
+  header->valid_patch_count = grub_ventoy_wimpatch_valid_patch_count;
+  header->record_size = sizeof (*record);
+  record = (struct grub_ventoy_windows_patch_blob_record *) (header + 1);
+
+  for (index = 0, node = grub_ventoy_wimpatch_patch_head;
+       node;
+       node = node->next, index++, record++)
+    {
+      record->valid = node->valid ? 1 : 0;
+      record->pathlen = node->pathlen;
+      grub_strncpy (record->path, node->path, sizeof (record->path) - 1);
+    }
+
+  *blob = header;
+  *blob_size = size;
+  return GRUB_ERR_NONE;
+}
 
 static size_t
 ventoy_wim_align2048 (size_t len)
@@ -441,89 +742,6 @@ ventoy_read_resource (grub_file_t fp, struct ventoy_wim_header *wimhdr,
     }
 
   *buffer = buf;
-  return 0;
-}
-
-static struct wim_directory_entry *
-search_wim_dirent (struct wim_directory_entry *dir, const char *search_name)
-{
-  do
-    {
-      if (dir->len && dir->name_len &&
-          ventoy_wim_name_eq (search_name, (grub_uint16_t *) (dir + 1),
-                              (grub_uint16_t) (dir->name_len / 2)))
-        return dir;
-
-      dir = (struct wim_directory_entry *) ((grub_uint8_t *) dir + dir->len);
-    }
-  while (dir->len >= sizeof (*dir));
-
-  return 0;
-}
-
-static struct wim_directory_entry *
-search_full_wim_dirent (void *meta_data, struct wim_directory_entry *dir,
-                        const char **path)
-{
-  struct wim_directory_entry *subdir;
-  struct wim_directory_entry *search = dir;
-
-  while (*path)
-    {
-      subdir = (struct wim_directory_entry *) ((char *) meta_data + search->subdir);
-      search = search_wim_dirent (subdir, *path);
-      if (!search)
-        return 0;
-      path++;
-    }
-  return search;
-}
-
-static int
-parse_custom_setup_path (char *cmdline, const char **path, char *exefile)
-{
-  int i = 0;
-  int len;
-  char *pos1;
-  char *pos2;
-
-  if ((cmdline[0] == 'x' || cmdline[0] == 'X') && cmdline[1] == ':')
-    {
-      pos1 = pos2 = cmdline + 3;
-      while (i < 16 && *pos2)
-        {
-          while (*pos2 && *pos2 != '\\' && *pos2 != '/')
-            pos2++;
-          path[i++] = pos1;
-          if (*pos2 == 0)
-            break;
-          *pos2 = 0;
-          pos1 = pos2 + 1;
-          pos2 = pos1;
-        }
-      if (i == 0 || i >= 16)
-        return 1;
-    }
-  else
-    {
-      path[i++] = "Windows";
-      path[i++] = "System32";
-      path[i++] = cmdline;
-    }
-
-  pos1 = (char *) path[i - 1];
-  while (*pos1 && *pos1 != ' ' && *pos1 != '\t')
-    pos1++;
-  *pos1 = 0;
-
-  len = grub_strlen (path[i - 1]);
-  if (len < 4 || grub_strcasecmp (path[i - 1] + len - 4, ".exe") != 0)
-    {
-      grub_snprintf (exefile, 256, "%s.exe", path[i - 1]);
-      path[i - 1] = exefile;
-    }
-
-  path[i] = 0;
   return 0;
 }
 

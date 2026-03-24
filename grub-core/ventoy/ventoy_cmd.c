@@ -103,6 +103,7 @@ grub_ventoy_cmd_fini_core (void)
 
 #ifdef GRUB_VTOY_CMD_SECTION_LINUX
 static grub_extcmd_t cmd_vtlinux;
+static grub_extcmd_t cmd_vtlinux_alias;
 static grub_extcmd_t cmd_vtlinuxboot;
 static grub_extcmd_t cmd_vt_parse_freenas_ver;
 static grub_extcmd_t cmd_vt_unix_parse_freebsd_ver;
@@ -125,6 +126,15 @@ static grub_extcmd_t cmd_vt_reset_fake_vlnk;
 
 static const struct grub_ventoy_cmd_desc grub_ventoy_linux_cmds[] =
 {
+  {
+    "vtlinux",
+    grub_cmd_vtlinux,
+    0,
+    "[--var PREFIX] [--kernel PATH] [--initrd PATH] [--cmdline STRING] [--persistence FILE] [--inject FILE] [--template FILE] [--runtime FILE] [--runtime-arch FILE] [--format iso9660|udf] [--script COMMANDS] FILE",
+    "Build a ventoy Linux chain blob and export scriptable environment variables.",
+    options_vtlinux,
+    &cmd_vtlinux_alias
+  },
   {
     "vt_linux_chain_data",
     grub_cmd_vtlinux,
@@ -182,7 +192,9 @@ grub_ventoy_cmd_fini_linux (void)
 
 #ifdef GRUB_VTOY_CMD_SECTION_WINDOWS
 static grub_extcmd_t cmd_vtwindows;
+static grub_extcmd_t cmd_vtwindows_alias;
 static grub_extcmd_t cmd_vtwimboot;
+static grub_extcmd_t cmd_vtwimboot_alias;
 static grub_extcmd_t cmd_vtchainloadwin;
 static grub_extcmd_t cmd_vt_is_pe64;
 static grub_extcmd_t cmd_vt_is_standard_winiso;
@@ -197,6 +209,15 @@ static grub_extcmd_t cmd_vt_wim_chain_data;
 static const struct grub_ventoy_cmd_desc grub_ventoy_windows_cmds[] =
 {
   {
+    "vtwindows",
+    grub_cmd_vtwindows,
+    0,
+    "Probe a Windows ISO/WIM image and export Ventoy-style metadata.",
+    "",
+    options_vtwindows,
+    &cmd_vtwindows_alias
+  },
+  {
     "vt_windows_chain_data",
     grub_cmd_vtwindows,
     0,
@@ -204,6 +225,15 @@ static const struct grub_ventoy_cmd_desc grub_ventoy_windows_cmds[] =
     "",
     options_vtwindows,
     &cmd_vtwindows
+  },
+  {
+    "vtwimboot",
+    grub_cmd_vtwimboot,
+    0,
+    "Prepare Ventoy Windows chain/runtime data and report the pending EFI consumer step.",
+    "",
+    options_vtwindows,
+    &cmd_vtwimboot_alias
   },
   {
     "vt_windows_wimboot_data",

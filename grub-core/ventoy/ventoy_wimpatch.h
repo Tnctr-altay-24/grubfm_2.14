@@ -14,6 +14,43 @@
 #include <grub/err.h>
 #include <grub/file.h>
 #include <grub/types.h>
+#include "ventoy_def.h"
+
+void
+grub_ventoy_wimpatch_reset (void);
+
+void
+grub_ventoy_wimpatch_clear_patched_wims (void);
+
+grub_uint32_t
+grub_ventoy_wimpatch_total_count (void);
+
+grub_uint32_t
+grub_ventoy_wimpatch_valid_count (void);
+
+grub_ventoy_windows_patch *
+grub_ventoy_wimpatch_head (void);
+
+grub_uint32_t
+grub_ventoy_wimpatch_patched_count (void);
+
+grub_ventoy_windows_patch *
+grub_ventoy_wimpatch_first_patched (void);
+
+char *
+grub_ventoy_wimpatch_extract_device_prefix (const char *fullpath);
+
+grub_err_t
+grub_ventoy_wimpatch_add (const char *path);
+
+grub_err_t
+grub_ventoy_wimpatch_collect_bcd (const char *loopname, const char *bcd_path);
+
+grub_err_t
+grub_ventoy_wimpatch_validate (const char *loopname);
+
+grub_err_t
+grub_ventoy_wimpatch_build_blob (void **blob, grub_size_t *blob_size);
 
 grub_err_t
 grub_ventoy_wimpatch_apply (grub_file_t wim_file,

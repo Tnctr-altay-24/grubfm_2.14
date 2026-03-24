@@ -11,8 +11,7 @@
 #include <grub/ventoy.h>
 
 #include "ventoy_vhd.h"
-
-#define VTOY_OFFSET_OF(type, member) ((grub_size_t) &((type *) 0)->member)
+#include "ventoy_def.h"
 
 struct grub_ventoy_mbr_part
 {
@@ -66,16 +65,6 @@ struct grub_ventoy_gpt_info
   struct grub_ventoy_mbr mbr;
   struct grub_ventoy_gpt_head head;
   struct grub_ventoy_gpt_part part[128];
-} GRUB_PACKED;
-
-struct grub_ventoy_patch_vhd
-{
-  grub_uint8_t part_offset_or_guid[16];
-  grub_uint32_t reserved1;
-  grub_uint32_t part_type;
-  grub_uint8_t disk_signature_or_guid[16];
-  grub_uint8_t reserved2[16];
-  grub_uint8_t vhd_file_path[1];
 } GRUB_PACKED;
 
 static void *grub_ventoy_wimboot_buf;
