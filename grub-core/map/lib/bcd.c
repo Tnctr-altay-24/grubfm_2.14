@@ -214,12 +214,20 @@ bcd_patch_path (const char *path)
   char path8[256], *p;
   wchar_t path16[256];
   grub_size_t len;
-  grub_size_t max_len = 2 * (strlen (search) + 1);
+  grub_size_t slen;
+
+  if (!path || !path[0])
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, "invalid BCD path");
+
   if (path[0] != '/')
-    grub_snprintf (path8, 256, "/%s", path);
+    grub_snprintf (path8, sizeof (path8), "/%s", path);
   else
-    grub_strncpy (path8, path, 256);
-  len = 2 * (strlen (path8) + 1);
+    {
+      slen = grub_strlcpy (path8, path, sizeof (path8));
+      if (slen >= sizeof (path8))
+        return grub_error (GRUB_ERR_BAD_ARGUMENT, "BCD path too long");
+    }
+  len = 2 * (grub_strlen (path8) + 1);
   /* replace '/' to '\\' */
   p = path8;
   while (*p)
@@ -232,14 +240,11 @@ bcd_patch_path (const char *path)
   grub_memset (path16, 0, sizeof (path16));
   grub_utf8_to_utf16 (path16, len, (grub_uint8_t *)path8, -1, NULL);
 
-  grub_dprintf ("bcddbg", "bcd: patch path src=%s dos=%s utf16_len=%lu max=%lu\n",
+  grub_dprintf ("bcddbg", "bcd: patch path src=%s dos=%s utf16_len=%lu\n",
                 path ? path : "(null)", path8,
-                (unsigned long) len, (unsigned long) max_len);
-  if (len > max_len)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT,
-                       "BCD path too long for template placeholder: %s", path8);
+                (unsigned long) len);
 
-  bcd_replace_hex (search, strlen (search), path16, len, 0);
+  bcd_replace_hex (search, grub_strlen (search), path16, len, 0);
   return GRUB_ERR_NONE;
 }
 
