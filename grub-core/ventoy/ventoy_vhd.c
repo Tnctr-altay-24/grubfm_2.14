@@ -81,6 +81,8 @@ struct grub_ventoy_patch_vhd
 static grub_extcmd_t cmd_vt_load_wimboot;
 static grub_extcmd_t cmd_vt_load_vhdboot;
 static grub_extcmd_t cmd_vt_patch_vhdboot;
+static grub_extcmd_t cmd_vt_get_vtoy_type;
+static grub_extcmd_t cmd_vt_raw_chain_data;
 
 static void *grub_ventoy_wimboot_buf;
 static grub_size_t grub_ventoy_wimboot_size;
@@ -89,6 +91,24 @@ static void *grub_ventoy_vhdboot_totbuf;
 static void *grub_ventoy_vhdboot_isobuf;
 static grub_size_t grub_ventoy_vhdboot_isolen;
 static int grub_ventoy_vhdboot_enable;
+static void *grub_ventoy_raw_chain_buf;
+static grub_uint64_t grub_ventoy_raw_trim_head_secnum;
+
+struct grub_ventoy_vhd_footer
+{
+  char cookie[8];
+  grub_uint8_t reserved1[52];
+  grub_uint32_t disktype;
+  grub_uint8_t reserved2[448];
+} GRUB_PACKED;
+
+struct grub_ventoy_vdi_preheader
+{
+  char file_info[64];
+  grub_uint32_t signature;
+} GRUB_PACKED;
+
+#define GRUB_VTOY_VDI_SIGNATURE 0xBEDA107FU
 
 static void
 grub_ventoy_memfile_env_set (const char *prefix, const void *buf,
@@ -575,6 +595,260 @@ grub_cmd_vt_patch_vhdboot (grub_extcmd_context_t ctxt __attribute__ ((unused)),
   return GRUB_ERR_NONE;
 }
 
+static int
+grub_ventoy_vhd_detect_part_type (grub_file_t file, grub_uint64_t offset,
+                                  const char *part_var, const char *alt_var)
+{
+  struct grub_ventoy_gpt_info gpt;
+  grub_ssize_t readlen;
+  int altboot = 0;
+  int i;
+
+  if (!file)
+    return 0;
+
+  grub_env_set (part_var, "unknown");
+  grub_env_set (alt_var, "0");
+
+  grub_file_seek (file, offset);
+  readlen = grub_file_read (file, &gpt, sizeof (gpt));
+  if (readlen != (grub_ssize_t) sizeof (gpt))
+    return 0;
+
+  if (gpt.mbr.sig55 != 0x55 || gpt.mbr.sigaa != 0xaa)
+    return 0;
+
+  if (grub_memcmp (gpt.head.signature, "EFI PART", 8) == 0)
+    {
+      grub_env_set (part_var, "gpt");
+      for (i = 0; i < 128; i++)
+        {
+          if (grub_memcmp (gpt.part[i].part_type, "Hah!IdontNeedEFI", 16) == 0)
+            {
+              altboot = 1;
+              break;
+            }
+          if (gpt.part[i].last_lba == 0)
+            break;
+        }
+    }
+  else
+    {
+      grub_env_set (part_var, "mbr");
+      for (i = 0; i < 4; i++)
+        {
+          if (gpt.mbr.part[i].type == 0xef)
+            {
+              altboot = 1;
+              break;
+            }
+        }
+    }
+
+  grub_env_set (alt_var, altboot ? "1" : "0");
+  return 1;
+}
+
+static grub_err_t
+grub_ventoy_raw_chain_trim_head (grub_file_t file, ventoy_chain_head *chain,
+                                 grub_uint64_t trim_head_secnum)
+{
+  ventoy_img_chunk *chunks;
+  grub_uint32_t chunk_num;
+  grub_uint32_t i;
+  grub_uint32_t imgstart;
+  grub_uint64_t trim_bytes;
+  grub_ssize_t readlen;
+
+  if (!file || !chain || trim_head_secnum == 0)
+    return GRUB_ERR_NONE;
+
+  chunks = (ventoy_img_chunk *) ((char *) chain + chain->img_chunk_offset);
+  chunk_num = chain->img_chunk_num;
+  if (!chunks || chunk_num == 0)
+    return grub_error (GRUB_ERR_BAD_FILE_TYPE, "invalid raw chain chunk list");
+
+  for (i = 0; i < chunk_num; i++)
+    {
+      grub_uint64_t start = chunks[i].disk_start_sector;
+      grub_uint64_t end = chunks[i].disk_end_sector;
+      grub_uint64_t delta;
+      grub_uint32_t imgsecs;
+
+      if (trim_head_secnum < start || trim_head_secnum > end)
+        continue;
+
+      delta = trim_head_secnum - start;
+      imgsecs = chunks[i].img_end_sector + 1 - chunks[i].img_start_sector;
+      if (delta >= ((grub_uint64_t) imgsecs * 4))
+        {
+          grub_size_t memsize;
+          if (i + 1 >= chunk_num)
+            return grub_error (GRUB_ERR_BAD_FILE_TYPE, "trim exceeds mapped image range");
+          memsize = (chunk_num - (i + 1)) * sizeof (ventoy_img_chunk);
+          grub_memmove (chunks, chunks + i + 1, memsize);
+          chunk_num -= (i + 1);
+        }
+      else
+        {
+          chunks[i].disk_start_sector += delta;
+          chunks[i].img_start_sector += (grub_uint32_t) (delta / 4);
+          if (i > 0)
+            {
+              grub_size_t memsize = (chunk_num - i) * sizeof (ventoy_img_chunk);
+              grub_memmove (chunks, chunks + i, memsize);
+              chunk_num -= i;
+            }
+        }
+      break;
+    }
+
+  if (i >= chunk_num)
+    return grub_error (GRUB_ERR_BAD_FILE_TYPE, "trim position not found in image chunk list");
+
+  imgstart = 0;
+  for (i = 0; i < chunk_num; i++)
+    {
+      grub_uint32_t imgsecs = chunks[i].img_end_sector + 1 - chunks[i].img_start_sector;
+      chunks[i].img_start_sector = imgstart;
+      chunks[i].img_end_sector = imgstart + (imgsecs - 1);
+      imgstart += imgsecs;
+    }
+
+  chain->img_chunk_num = chunk_num;
+  trim_bytes = trim_head_secnum * 512ULL;
+  if (chain->real_img_size_in_bytes <= trim_bytes)
+    return grub_error (GRUB_ERR_BAD_FILE_TYPE, "trim exceeds raw image size");
+  chain->real_img_size_in_bytes -= trim_bytes;
+  chain->virt_img_size_in_bytes = chain->real_img_size_in_bytes;
+
+  grub_file_seek (file, trim_bytes);
+  readlen = grub_file_read (file, chain->boot_catalog_sector, 512);
+  if (readlen != 512)
+    return grub_error (GRUB_ERR_READ_ERROR, "failed to read trimmed image header");
+
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
+grub_cmd_vt_get_vtoy_type (grub_extcmd_context_t ctxt __attribute__ ((unused)),
+                           int argc, char **args)
+{
+  grub_file_t file = 0;
+  struct grub_ventoy_vhd_footer vhdfoot;
+  struct grub_ventoy_vdi_preheader vdihdr;
+  grub_ssize_t readlen;
+  char type[16];
+  grub_uint64_t offset = 0;
+  int have_offset = 0;
+
+  if (argc != 4)
+    return GRUB_ERR_NONE;
+
+  file = grub_file_open (args[0], GRUB_FILE_TYPE_GET_SIZE);
+  if (!file)
+    return GRUB_ERR_NONE;
+
+  grub_ventoy_raw_trim_head_secnum = 0;
+  grub_snprintf (type, sizeof (type), "unknown");
+  grub_env_set (args[2], "unknown");
+  grub_env_set (args[3], "0");
+
+  if (grub_file_size (file) >= sizeof (vhdfoot))
+    {
+      grub_file_seek (file, grub_file_size (file) - sizeof (vhdfoot));
+      readlen = grub_file_read (file, &vhdfoot, sizeof (vhdfoot));
+      if (readlen == (grub_ssize_t) sizeof (vhdfoot)
+          && grub_memcmp (vhdfoot.cookie, "conectix", 8) == 0)
+        {
+          grub_snprintf (type, sizeof (type), "vhd%u",
+                         (unsigned) grub_swap_bytes32 (vhdfoot.disktype));
+          offset = 0;
+          have_offset = 1;
+        }
+    }
+
+  if (!have_offset)
+    {
+      grub_file_seek (file, 0);
+      readlen = grub_file_read (file, &vdihdr, sizeof (vdihdr));
+      if (readlen == (grub_ssize_t) sizeof (vdihdr)
+          && vdihdr.signature == GRUB_VTOY_VDI_SIGNATURE)
+        {
+          grub_snprintf (type, sizeof (type), "vdi");
+          offset = 2U * 1024U * 1024U;
+          grub_ventoy_raw_trim_head_secnum = offset / 512U;
+          have_offset = 1;
+        }
+      else
+        {
+          grub_snprintf (type, sizeof (type), "raw");
+          offset = 0;
+          have_offset = 1;
+        }
+    }
+
+  grub_env_set (args[1], type);
+  if (have_offset
+      && !grub_ventoy_vhd_detect_part_type (file, offset, args[2], args[3]))
+    grub_env_set (args[1], "unknown");
+
+  grub_file_close (file);
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
+grub_cmd_vt_raw_chain_data (grub_extcmd_context_t ctxt __attribute__ ((unused)),
+                            int argc, char **args)
+{
+  grub_err_t err;
+  grub_file_t file;
+  ventoy_chain_head *chain;
+  grub_size_t chain_size;
+  grub_uint8_t iso_format = 0;
+
+  if (argc != 1)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, "filename expected");
+
+  file = grub_file_open (args[0], GRUB_FILE_TYPE_GET_SIZE);
+  if (!file)
+    return grub_errno;
+
+  if (!file->device || !file->device->disk)
+    {
+      grub_file_close (file);
+      return grub_error (GRUB_ERR_BAD_DEVICE, "raw chain file must be disk backed");
+    }
+
+  if (file->fs && file->fs->name && grub_strcmp (file->fs->name, "udf") == 0)
+    iso_format = 1;
+
+  err = grub_ventoy_build_chain (file, ventoy_chain_linux, iso_format,
+                                 (void **) &chain, &chain_size);
+  if (err != GRUB_ERR_NONE)
+    {
+      grub_file_close (file);
+      return err;
+    }
+
+  err = grub_ventoy_raw_chain_trim_head (file, chain,
+                                         grub_ventoy_raw_trim_head_secnum);
+  if (err != GRUB_ERR_NONE)
+    {
+      grub_free (chain);
+      grub_file_close (file);
+      return err;
+    }
+
+  grub_free (grub_ventoy_raw_chain_buf);
+  grub_ventoy_raw_chain_buf = chain;
+  grub_ventoy_memfile_env_set ("vtoy_chain_mem", chain,
+                               (grub_uint64_t) chain_size);
+
+  grub_file_close (file);
+  return GRUB_ERR_NONE;
+}
+
 void
 grub_ventoy_vhd_boot_init (void)
 {
@@ -587,11 +861,21 @@ grub_ventoy_vhd_boot_init (void)
   cmd_vt_patch_vhdboot = grub_register_extcmd (
       "vt_patch_vhdboot", grub_cmd_vt_patch_vhdboot, 0,
       "", "", 0);
+  cmd_vt_get_vtoy_type = grub_register_extcmd (
+      "vt_get_vtoy_type", grub_cmd_vt_get_vtoy_type, 0,
+      "", "", 0);
+  cmd_vt_raw_chain_data = grub_register_extcmd (
+      "vt_raw_chain_data", grub_cmd_vt_raw_chain_data, 0,
+      "", "", 0);
 }
 
 void
 grub_ventoy_vhd_boot_fini (void)
 {
+  if (cmd_vt_raw_chain_data)
+    grub_unregister_extcmd (cmd_vt_raw_chain_data);
+  if (cmd_vt_get_vtoy_type)
+    grub_unregister_extcmd (cmd_vt_get_vtoy_type);
   if (cmd_vt_patch_vhdboot)
     grub_unregister_extcmd (cmd_vt_patch_vhdboot);
   if (cmd_vt_load_vhdboot)
@@ -608,4 +892,7 @@ grub_ventoy_vhd_boot_fini (void)
   grub_ventoy_vhdboot_totbuf = 0;
   grub_ventoy_vhdboot_isobuf = 0;
   grub_ventoy_vhdboot_isolen = 0;
+
+  grub_free (grub_ventoy_raw_chain_buf);
+  grub_ventoy_raw_chain_buf = 0;
 }

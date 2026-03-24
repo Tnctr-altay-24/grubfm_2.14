@@ -29,6 +29,8 @@ GRUB_MOD_LICENSE ("GPLv3+");
 static grub_extcmd_t cmd_vtwindows;
 static grub_extcmd_t cmd_vtwimboot;
 static grub_extcmd_t cmd_vtchainloadwin;
+static grub_extcmd_t cmd_vt_windows_reset;
+static grub_extcmd_t cmd_vt_wim_check_bootable;
 static void *grub_ventoy_windows_last_chain_buf;
 static grub_size_t grub_ventoy_windows_last_chain_size;
 static void *grub_ventoy_windows_last_rtdata_buf;
@@ -3153,6 +3155,50 @@ grub_ventoy_windows_prepare (grub_extcmd_context_t ctxt, int argc, char **args,
 }
 
 static grub_err_t
+grub_cmd_vt_windows_reset (grub_extcmd_context_t ctxt __attribute__ ((unused)),
+                           int argc __attribute__ ((unused)),
+                           char **args __attribute__ ((unused)))
+{
+  grub_ventoy_windows_reset_patches ();
+  grub_ventoy_windows_clear_patched_wims ();
+
+  grub_free (grub_ventoy_windows_last_patch_blob_buf);
+  grub_ventoy_windows_last_patch_blob_buf = 0;
+  grub_ventoy_windows_last_patch_blob_size = 0;
+
+  grub_free (grub_ventoy_windows_last_patched_wim_buf);
+  grub_ventoy_windows_last_patched_wim_buf = 0;
+  grub_ventoy_windows_last_patched_wim_size = 0;
+
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
+grub_cmd_vt_wim_check_bootable (grub_extcmd_context_t ctxt __attribute__ ((unused)),
+                                int argc, char **args)
+{
+  grub_file_t file;
+  int boot_index;
+
+  if (argc != 1)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, "filename expected");
+
+  file = grub_ventoy_windows_file_open (args[0]);
+  if (!file)
+    return grub_errno ? grub_errno :
+                       grub_error (GRUB_ERR_FILE_NOT_FOUND,
+                                   "failed to open %s", args[0]);
+
+  boot_index = grub_ventoy_wim_boot_index (file);
+  grub_file_close (file);
+
+  if (boot_index == 0)
+    return grub_error (GRUB_ERR_BAD_FILE_TYPE, "wim has no boot index");
+
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
 grub_cmd_vtwindows (grub_extcmd_context_t ctxt, int argc, char **args)
 {
   struct grub_arg_list *state = ctxt ? ctxt->state : 0;
@@ -3433,6 +3479,12 @@ GRUB_MOD_INIT(ventoywindows)
                                              N_("Prepare Windows Ventoy metadata and chainload the original Ventoy UEFI consumer."),
                                              "",
                                              options_vtwindows);
+  cmd_vt_windows_reset = grub_register_extcmd ("vt_windows_reset",
+                                               grub_cmd_vt_windows_reset, 0,
+                                               "", "", 0);
+  cmd_vt_wim_check_bootable = grub_register_extcmd ("vt_wim_check_bootable",
+                                                    grub_cmd_vt_wim_check_bootable, 0,
+                                                    "", "", 0);
 }
 
 GRUB_MOD_FINI(ventoywindows)
@@ -3467,6 +3519,8 @@ GRUB_MOD_FINI(ventoywindows)
   grub_ventoy_windows_last_launch_path = 0;
   grub_free (grub_ventoy_windows_last_launch_name);
   grub_ventoy_windows_last_launch_name = 0;
+  grub_unregister_extcmd (cmd_vt_wim_check_bootable);
+  grub_unregister_extcmd (cmd_vt_windows_reset);
   grub_unregister_extcmd (cmd_vtwindows);
   grub_unregister_extcmd (cmd_vtwimboot);
   grub_unregister_extcmd (cmd_vtchainloadwin);
