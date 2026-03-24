@@ -22,8 +22,6 @@
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
-static grub_extcmd_t cmd_vtlinux;
-static grub_extcmd_t cmd_vtlinuxboot;
 static void *grub_ventoy_linux_last_chain_buf;
 static grub_size_t grub_ventoy_linux_last_chain_size;
 static void *grub_ventoy_linux_last_meta_buf;
@@ -1311,18 +1309,13 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
   return err;
 }
 
+#define GRUB_VTOY_CMD_SECTION_LINUX
+#include "ventoy_cmd.c"
+#undef GRUB_VTOY_CMD_SECTION_LINUX
+
 GRUB_MOD_INIT(ventoylinux)
 {
-  cmd_vtlinux = grub_register_extcmd (
-      "vt_linux_chain_data", grub_cmd_vtlinux, 0,
-      N_("[--var PREFIX] [--kernel PATH] [--initrd PATH] [--cmdline STRING] [--persistence FILE] [--inject FILE] [--template FILE] [--runtime FILE] [--runtime-arch FILE] [--format iso9660|udf] [--script COMMANDS] FILE"),
-      N_("Build a ventoy Linux chain blob and export scriptable environment variables."),
-      options_vtlinux);
-  cmd_vtlinuxboot = grub_register_extcmd (
-      "vtlinuxboot", grub_cmd_vtlinuxboot, 0,
-      N_("[--var PREFIX] --kernel PATH --initrd PATH [--cmdline STRING] [--persistence FILE] [--inject FILE] [--template FILE] [--runtime FILE] [--runtime-arch FILE] [--format iso9660|udf] [--linux-cmd CMD] [--initrd-cmd CMD] [--loop-name NAME] FILE"),
-      N_("Build Ventoy Linux metadata and directly boot using loopback + initrd chaining."),
-      options_vtlinuxboot);
+  grub_ventoy_cmd_init_linux ();
 }
 
 GRUB_MOD_FINI(ventoylinux)
@@ -1339,6 +1332,5 @@ GRUB_MOD_FINI(ventoylinux)
   grub_free (grub_ventoy_linux_last_runtime_arch_buf);
   grub_ventoy_linux_last_runtime_arch_buf = 0;
   grub_ventoy_linux_last_runtime_arch_size = 0;
-  grub_unregister_extcmd (cmd_vtlinuxboot);
-  grub_unregister_extcmd (cmd_vtlinux);
+  grub_ventoy_cmd_fini_linux ();
 }

@@ -26,15 +26,6 @@
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
-static grub_extcmd_t cmd_vtwindows;
-static grub_extcmd_t cmd_vtwimboot;
-static grub_extcmd_t cmd_vtchainloadwin;
-static grub_extcmd_t cmd_vt_windows_reset;
-static grub_extcmd_t cmd_vt_wim_check_bootable;
-static grub_extcmd_t cmd_vt_windows_collect_wim_patch;
-static grub_extcmd_t cmd_vt_windows_locate_wim_patch;
-static grub_extcmd_t cmd_vt_windows_count_wim_patch;
-static grub_extcmd_t cmd_vt_dump_wim_patch;
 static void *grub_ventoy_windows_last_chain_buf;
 static grub_size_t grub_ventoy_windows_last_chain_size;
 static void *grub_ventoy_windows_last_rtdata_buf;
@@ -2455,6 +2446,36 @@ grub_ventoy_windows_export_u64 (const char *prefix, const char *suffix,
   return grub_ventoy_windows_export (prefix, suffix, buf);
 }
 
+static void
+grub_ventoy_windows_memfile_env_set (const char *prefix, const void *buf,
+                                     grub_uint64_t len)
+{
+  char name[64];
+  char value[64];
+
+  if (!prefix || !*prefix)
+    return;
+
+  grub_snprintf (name, sizeof (name), "%s_addr", prefix);
+  if (!buf || len == 0)
+    {
+      grub_env_unset (name);
+      grub_snprintf (name, sizeof (name), "%s_size", prefix);
+      grub_env_unset (name);
+      return;
+    }
+
+  grub_snprintf (value, sizeof (value), "0x%llx",
+                 (unsigned long long) (grub_addr_t) buf);
+  grub_env_set (name, value);
+  grub_env_export (name);
+
+  grub_snprintf (name, sizeof (name), "%s_size", prefix);
+  grub_snprintf (value, sizeof (value), "%llu", (unsigned long long) len);
+  grub_env_set (name, value);
+  grub_env_export (name);
+}
+
 static grub_err_t
 grub_ventoy_windows_export_image_meta (const char *prefix, grub_file_t file,
                                        const char *name)
@@ -3178,6 +3199,182 @@ grub_cmd_vt_windows_reset (grub_extcmd_context_t ctxt __attribute__ ((unused)),
 }
 
 static grub_err_t
+grub_cmd_vt_is_pe64 (grub_extcmd_context_t ctxt __attribute__ ((unused)),
+                     int argc, char **args)
+{
+  grub_file_t file;
+  grub_uint8_t buf[512];
+  grub_ssize_t rdlen;
+  grub_uint32_t pe_off;
+  grub_uint16_t magic;
+
+  if (argc != 1)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, "filename expected");
+
+  file = grub_ventoy_windows_file_open (args[0]);
+  if (!file)
+    return grub_errno ? grub_errno :
+                       grub_error (GRUB_ERR_FILE_NOT_FOUND,
+                                   "failed to open %s", args[0]);
+
+  grub_memset (buf, 0, sizeof (buf));
+  rdlen = grub_file_read (file, buf, sizeof (buf));
+  grub_file_close (file);
+  if (rdlen < 0)
+    return grub_errno ? grub_errno :
+                       grub_error (GRUB_ERR_READ_ERROR,
+                                   "failed to read %s", args[0]);
+
+  if (rdlen < 64 || buf[0] != 'M' || buf[1] != 'Z')
+    return GRUB_ERR_TEST_FAILURE;
+
+  pe_off = grub_le_to_cpu32 (grub_get_unaligned32 (buf + 60));
+  if (pe_off > (grub_uint32_t) rdlen || (grub_uint32_t) rdlen - pe_off < 26)
+    return GRUB_ERR_TEST_FAILURE;
+
+  if (buf[pe_off] != 'P' || buf[pe_off + 1] != 'E' ||
+      buf[pe_off + 2] != 0 || buf[pe_off + 3] != 0)
+    return GRUB_ERR_TEST_FAILURE;
+
+  magic = grub_le_to_cpu16 (grub_get_unaligned16 (buf + pe_off + 24));
+  return (magic == 0x020b) ? GRUB_ERR_NONE : GRUB_ERR_TEST_FAILURE;
+}
+
+static int
+grub_ventoy_windows_path_exists (const char *path)
+{
+  grub_file_t file;
+
+  file = grub_ventoy_windows_file_open (path);
+  if (!file)
+    {
+      grub_errno = GRUB_ERR_NONE;
+      return 0;
+    }
+
+  grub_file_close (file);
+  return 1;
+}
+
+static int
+grub_ventoy_windows_tree_path_exists (const char *root,
+                                      const char *prefix,
+                                      const char *suffix)
+{
+  char *full;
+  int rc;
+
+  full = grub_xasprintf ("%s%s%s", root ? root : "",
+                         prefix ? prefix : "",
+                         suffix ? suffix : "");
+  if (!full)
+    return -1;
+
+  rc = grub_ventoy_windows_path_exists (full);
+  grub_free (full);
+  return rc;
+}
+
+static int
+grub_ventoy_windows_tree_any_path_exists (const char *root,
+                                          const char *prefix,
+                                          const char *const *suffixes)
+{
+  grub_uint32_t i;
+  int rc;
+
+  for (i = 0; suffixes && suffixes[i]; i++)
+    {
+      rc = grub_ventoy_windows_tree_path_exists (root, prefix, suffixes[i]);
+      if (rc < 0)
+        return -1;
+      if (rc)
+        return 1;
+    }
+
+  return 0;
+}
+
+static grub_err_t
+grub_cmd_vt_is_standard_winiso (grub_extcmd_context_t ctxt __attribute__ ((unused)),
+                                int argc, char **args)
+{
+  const char *root;
+  const char *prefix;
+  int rc;
+  const char *const root_boot_wim[] = { "/sources/boot.wim", "/sources/BOOT.WIM", 0 };
+  const char *const x86_boot_wim[] = { "/x86/sources/boot.wim", "/x86/sources/BOOT.WIM", 0 };
+  const char *const x64_boot_wim[] = { "/x64/sources/boot.wim", "/x64/sources/BOOT.WIM", 0 };
+  const char *const bcd_files[] = { "/boot/bcd", "/boot/BCD", 0 };
+  const char *const sdi_files[] = { "/boot/boot.sdi", "/boot/BOOT.SDI", 0 };
+  const char *const install_files[] =
+    {
+      "/sources/install.wim",
+      "/sources/install.WIM",
+      "/sources/install.esd",
+      "/sources/install.ESD",
+      0
+    };
+  const char *const setup_files[] = { "/setup.exe", "/SETUP.EXE", 0 };
+
+  if (argc != 1)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, "root path expected");
+
+  root = args[0];
+  if (!root || !*root)
+    return GRUB_ERR_TEST_FAILURE;
+
+  rc = grub_ventoy_windows_tree_any_path_exists (root, "", root_boot_wim);
+  if (rc < 0)
+    return grub_errno;
+  if (rc)
+    prefix = "";
+  else
+    {
+      rc = grub_ventoy_windows_tree_any_path_exists (root, "", x86_boot_wim);
+      if (rc < 0)
+        return grub_errno;
+      if (rc)
+        prefix = "/x86";
+      else
+        {
+          rc = grub_ventoy_windows_tree_any_path_exists (root, "", x64_boot_wim);
+          if (rc < 0)
+            return grub_errno;
+          if (!rc)
+            return GRUB_ERR_TEST_FAILURE;
+          prefix = "/x64";
+        }
+    }
+
+  rc = grub_ventoy_windows_tree_any_path_exists (root, prefix, bcd_files);
+  if (rc < 0)
+    return grub_errno;
+  if (!rc)
+    return GRUB_ERR_TEST_FAILURE;
+
+  rc = grub_ventoy_windows_tree_any_path_exists (root, prefix, sdi_files);
+  if (rc < 0)
+    return grub_errno;
+  if (!rc)
+    return GRUB_ERR_TEST_FAILURE;
+
+  rc = grub_ventoy_windows_tree_any_path_exists (root, prefix, install_files);
+  if (rc < 0)
+    return grub_errno;
+  if (!rc)
+    return GRUB_ERR_TEST_FAILURE;
+
+  rc = grub_ventoy_windows_tree_any_path_exists (root, "", setup_files);
+  if (rc < 0)
+    return grub_errno;
+  if (!rc)
+    return GRUB_ERR_TEST_FAILURE;
+
+  return GRUB_ERR_NONE;
+}
+
+static grub_err_t
 grub_cmd_vt_wim_check_bootable (grub_extcmd_context_t ctxt __attribute__ ((unused)),
                                 int argc, char **args)
 {
@@ -3275,6 +3472,49 @@ grub_cmd_vt_windows_locate_wim_patch (grub_extcmd_context_t ctxt __attribute__ (
     return grub_error (GRUB_ERR_BAD_ARGUMENT, "loop name expected");
 
   return grub_ventoy_windows_validate_patches (args[0]);
+}
+
+static grub_err_t
+grub_cmd_vt_wim_chain_data (grub_extcmd_context_t ctxt __attribute__ ((unused)),
+                            int argc, char **args)
+{
+  grub_err_t err;
+  grub_file_t file;
+  ventoy_chain_head *chain;
+  grub_size_t chain_size;
+  grub_uint8_t iso_format = 0;
+
+  if (argc != 1)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, "filename expected");
+
+  file = grub_ventoy_windows_file_open (args[0]);
+  if (!file)
+    return grub_errno ? grub_errno :
+                       grub_error (GRUB_ERR_FILE_NOT_FOUND,
+                                   "failed to open %s", args[0]);
+
+  if (!file->device || !file->device->disk)
+    {
+      grub_file_close (file);
+      return grub_error (GRUB_ERR_BAD_DEVICE, "wim chain source must be disk backed");
+    }
+
+  if (file->fs && file->fs->name && grub_strcmp (file->fs->name, "udf") == 0)
+    iso_format = 1;
+
+  err = grub_ventoy_build_chain (file, ventoy_chain_wim, iso_format,
+                                 (void **) &chain, &chain_size);
+  grub_file_close (file);
+  if (err != GRUB_ERR_NONE)
+    return err;
+
+  grub_free (grub_ventoy_windows_last_chain_buf);
+  grub_ventoy_windows_last_chain_buf = chain;
+  grub_ventoy_windows_last_chain_size = chain_size;
+  grub_ventoy_windows_memfile_env_set ("vtoy_chain_mem", chain,
+                                       (grub_uint64_t) chain_size);
+
+  return GRUB_ERR_NONE;
 }
 
 static grub_err_t
@@ -3543,39 +3783,14 @@ fail:
   return err;
 }
 
+#define GRUB_VTOY_CMD_SECTION_WINDOWS
+#include "ventoy_cmd.c"
+#undef GRUB_VTOY_CMD_SECTION_WINDOWS
+
 GRUB_MOD_INIT(ventoywindows)
 {
   grub_ventoy_vhd_boot_init ();
-  cmd_vtwindows = grub_register_extcmd ("vt_windows_chain_data", grub_cmd_vtwindows, 0,
-                                        N_("Probe a Windows ISO/WIM image and export Ventoy-style metadata."),
-                                        "",
-                                        options_vtwindows);
-  cmd_vtwimboot = grub_register_extcmd ("vt_windows_wimboot_data", grub_cmd_vtwimboot, 0,
-                                        N_("Prepare Ventoy Windows chain/runtime data and report the pending EFI consumer step."),
-                                        "",
-                                        options_vtwindows);
-  cmd_vtchainloadwin = grub_register_extcmd ("vtchainloadwin", grub_cmd_vtchainloadwin, 0,
-                                             N_("Prepare Windows Ventoy metadata and chainload the original Ventoy UEFI consumer."),
-                                             "",
-                                             options_vtwindows);
-  cmd_vt_windows_reset = grub_register_extcmd ("vt_windows_reset",
-                                               grub_cmd_vt_windows_reset, 0,
-                                               "", "", 0);
-  cmd_vt_wim_check_bootable = grub_register_extcmd ("vt_wim_check_bootable",
-                                                    grub_cmd_vt_wim_check_bootable, 0,
-                                                    "", "", 0);
-  cmd_vt_windows_collect_wim_patch = grub_register_extcmd (
-      "vt_windows_collect_wim_patch", grub_cmd_vt_windows_collect_wim_patch, 0,
-      "", "", 0);
-  cmd_vt_windows_locate_wim_patch = grub_register_extcmd (
-      "vt_windows_locate_wim_patch", grub_cmd_vt_windows_locate_wim_patch, 0,
-      "", "", 0);
-  cmd_vt_windows_count_wim_patch = grub_register_extcmd (
-      "vt_windows_count_wim_patch", grub_cmd_vt_windows_count_wim_patch, 0,
-      "", "", 0);
-  cmd_vt_dump_wim_patch = grub_register_extcmd (
-      "vt_dump_wim_patch", grub_cmd_vt_dump_wim_patch, 0,
-      "", "", 0);
+  grub_ventoy_cmd_init_windows ();
 }
 
 GRUB_MOD_FINI(ventoywindows)
@@ -3610,13 +3825,5 @@ GRUB_MOD_FINI(ventoywindows)
   grub_ventoy_windows_last_launch_path = 0;
   grub_free (grub_ventoy_windows_last_launch_name);
   grub_ventoy_windows_last_launch_name = 0;
-  grub_unregister_extcmd (cmd_vt_dump_wim_patch);
-  grub_unregister_extcmd (cmd_vt_windows_count_wim_patch);
-  grub_unregister_extcmd (cmd_vt_windows_locate_wim_patch);
-  grub_unregister_extcmd (cmd_vt_windows_collect_wim_patch);
-  grub_unregister_extcmd (cmd_vt_wim_check_bootable);
-  grub_unregister_extcmd (cmd_vt_windows_reset);
-  grub_unregister_extcmd (cmd_vtwindows);
-  grub_unregister_extcmd (cmd_vtwimboot);
-  grub_unregister_extcmd (cmd_vtchainloadwin);
+  grub_ventoy_cmd_fini_windows ();
 }

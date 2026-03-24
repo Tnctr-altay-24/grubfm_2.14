@@ -78,12 +78,6 @@ struct grub_ventoy_patch_vhd
   grub_uint8_t vhd_file_path[1];
 } GRUB_PACKED;
 
-static grub_extcmd_t cmd_vt_load_wimboot;
-static grub_extcmd_t cmd_vt_load_vhdboot;
-static grub_extcmd_t cmd_vt_patch_vhdboot;
-static grub_extcmd_t cmd_vt_get_vtoy_type;
-static grub_extcmd_t cmd_vt_raw_chain_data;
-
 static void *grub_ventoy_wimboot_buf;
 static grub_size_t grub_ventoy_wimboot_size;
 
@@ -849,39 +843,20 @@ grub_cmd_vt_raw_chain_data (grub_extcmd_context_t ctxt __attribute__ ((unused)),
   return GRUB_ERR_NONE;
 }
 
+#define GRUB_VTOY_CMD_SECTION_VHD
+#include "ventoy_cmd.c"
+#undef GRUB_VTOY_CMD_SECTION_VHD
+
 void
 grub_ventoy_vhd_boot_init (void)
 {
-  cmd_vt_load_wimboot = grub_register_extcmd (
-      "vt_load_wimboot", grub_cmd_vt_load_wimboot, 0,
-      "", "", 0);
-  cmd_vt_load_vhdboot = grub_register_extcmd (
-      "vt_load_vhdboot", grub_cmd_vt_load_vhdboot, 0,
-      "", "", 0);
-  cmd_vt_patch_vhdboot = grub_register_extcmd (
-      "vt_patch_vhdboot", grub_cmd_vt_patch_vhdboot, 0,
-      "", "", 0);
-  cmd_vt_get_vtoy_type = grub_register_extcmd (
-      "vt_get_vtoy_type", grub_cmd_vt_get_vtoy_type, 0,
-      "", "", 0);
-  cmd_vt_raw_chain_data = grub_register_extcmd (
-      "vt_raw_chain_data", grub_cmd_vt_raw_chain_data, 0,
-      "", "", 0);
+  grub_ventoy_cmd_init_vhd ();
 }
 
 void
 grub_ventoy_vhd_boot_fini (void)
 {
-  if (cmd_vt_raw_chain_data)
-    grub_unregister_extcmd (cmd_vt_raw_chain_data);
-  if (cmd_vt_get_vtoy_type)
-    grub_unregister_extcmd (cmd_vt_get_vtoy_type);
-  if (cmd_vt_patch_vhdboot)
-    grub_unregister_extcmd (cmd_vt_patch_vhdboot);
-  if (cmd_vt_load_vhdboot)
-    grub_unregister_extcmd (cmd_vt_load_vhdboot);
-  if (cmd_vt_load_wimboot)
-    grub_unregister_extcmd (cmd_vt_load_wimboot);
+  grub_ventoy_cmd_fini_vhd ();
 
   grub_free (grub_ventoy_wimboot_buf);
   grub_ventoy_wimboot_buf = 0;

@@ -22,9 +22,6 @@
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
-static grub_extcmd_t cmd_vtinfo;
-static grub_extcmd_t cmd_vtchunk;
-static grub_extcmd_t cmd_vtchain;
 static void *grub_ventoy_last_chain_buf;
 static grub_size_t grub_ventoy_last_chain_size;
 
@@ -533,19 +530,13 @@ grub_cmd_vtchain (grub_extcmd_context_t ctxt, int argc, char **args)
   return GRUB_ERR_NONE;
 }
 
+#define GRUB_VTOY_CMD_SECTION_CORE
+#include "ventoy_cmd.c"
+#undef GRUB_VTOY_CMD_SECTION_CORE
+
 GRUB_MOD_INIT(ventoycore)
 {
-  cmd_vtinfo = grub_register_extcmd ("vtinfo", grub_cmd_vtinfo, 0,
-                                     N_("Show ventoy compatibility ABI information."),
-                                     0, 0);
-  cmd_vtchunk = grub_register_extcmd ("vtchunk", grub_cmd_vtchunk, 0,
-                                      N_("FILE"),
-                                      N_("Show collected physical chunks for a disk-backed image."),
-                                      0);
-  cmd_vtchain = grub_register_extcmd ("vtchain", grub_cmd_vtchain, 0,
-                                      N_("[--var VAR] [--type linux|windows|wim] [--format iso9660|udf] FILE"),
-                                      N_("Build a ventoy chain blob and export its mem: path."),
-                                      options_vtchain);
+  grub_ventoy_cmd_init_core ();
 }
 
 GRUB_MOD_FINI(ventoycore)
@@ -553,7 +544,5 @@ GRUB_MOD_FINI(ventoycore)
   grub_free (grub_ventoy_last_chain_buf);
   grub_ventoy_last_chain_buf = 0;
   grub_ventoy_last_chain_size = 0;
-  grub_unregister_extcmd (cmd_vtchain);
-  grub_unregister_extcmd (cmd_vtchunk);
-  grub_unregister_extcmd (cmd_vtinfo);
+  grub_ventoy_cmd_fini_core ();
 }
