@@ -18,12 +18,9 @@
 #include <grub/mm.h>
 #include <grub/parser.h>
 #include <grub/ventoy.h>
-#include <grub/wimtools.h>
-#include <misc.h>
-#include <vfat.h>
-#include <wim.h>
-#include <wimboot.h>
-#include <wimpatch.h>
+#include "ventoy_vfat.h"
+#include "ventoy_wim.h"
+#include "ventoy_wimtools.h"
 #include "ventoy_wimpatch.h"
 
 GRUB_MOD_LICENSE ("GPLv3+");
@@ -53,6 +50,15 @@ static ventoy_grub_param grub_ventoy_windows_env_param;
 static grub_uint32_t grub_ventoy_windows_patch_count;
 static grub_uint32_t grub_ventoy_windows_valid_patch_count;
 
+static grub_file_t
+grub_ventoy_windows_file_open (const char *name)
+{
+  if (!name || !*name)
+    return 0;
+
+  return grub_file_open (name, GRUB_FILE_TYPE_LOOPBACK);
+}
+
 static grub_err_t grub_ventoy_windows_export (const char *prefix,
                                               const char *suffix,
                                               const char *value);
@@ -77,7 +83,7 @@ static grub_err_t grub_ventoy_windows_install_udf_override (const char *prefix,
                                                             const char *wim_full,
                                                             ventoy_chain_head **chainp,
                                                             grub_size_t *chain_sizep);
-static void grub_ventoy_windows_finalize_env_param (const char *wim_path,
+static void grub_ventoy_windows_finalize_env_param (const char *ventoy_wim_path,
                                                     ventoy_chain_head *chain);
 static grub_err_t grub_ventoy_windows_detect_launch_target (const char *prefix,
                                                             const char *wim_full,
@@ -739,7 +745,7 @@ grub_ventoy_windows_export_env_param (const char *prefix)
 }
 
 static void
-grub_ventoy_windows_finalize_env_param (const char *wim_path,
+grub_ventoy_windows_finalize_env_param (const char *ventoy_wim_path,
                                         ventoy_chain_head *chain)
 {
   struct grub_ventoy_windows_patch *node;
@@ -773,7 +779,7 @@ grub_ventoy_windows_finalize_env_param (const char *wim_path,
                                         replace->old_file_name[0]);
     }
 
-  if (idx == 0 && wim_path && *wim_path)
+  if (idx == 0 && ventoy_wim_path && *ventoy_wim_path)
     {
       ventoy_grub_param_file_replace *replace;
       replace = &grub_ventoy_windows_env_param.img_replace[0];
@@ -782,7 +788,7 @@ grub_ventoy_windows_finalize_env_param (const char *wim_path,
       replace->new_file_virtual_id = 0;
       grub_snprintf (replace->old_file_name[0],
                      sizeof (replace->old_file_name[0]),
-                     "%s", wim_path);
+                     "%s", ventoy_wim_path);
       grub_ventoy_windows_debug_string ("vtwindows-env", "img_replace_fallback",
                                         replace->old_file_name[0]);
     }
@@ -897,13 +903,13 @@ grub_ventoy_windows_detect_wim_arch (const char *loopname, const char *wim,
   if (!file)
     return 1;
 
-  image_count = grub_wim_image_count (file);
-  boot_index = grub_wim_boot_index (file);
+  image_count = grub_ventoy_wim_image_count (file);
+  boot_index = grub_ventoy_wim_boot_index (file);
   probe_index = requested_index;
   if (probe_index == 0)
     probe_index = boot_index;
 
-  is64 = grub_wim_is64 (file, probe_index);
+  is64 = grub_ventoy_wim_is64 (file, probe_index);
   grub_file_close (file);
 
   if (boot_index_out)
@@ -958,35 +964,35 @@ grub_ventoy_windows_export_jump_bundle (const char *prefix, ventoy_chain_head *c
 static grub_err_t
 grub_ventoy_windows_extract_wim_virtual_file (grub_file_t wimfp,
                                               unsigned int boot_index,
-                                              const wchar_t *wim_path,
+                                              const wchar_t *ventoy_wim_path,
                                               void **buf_out,
                                               grub_size_t *size_out)
 {
   struct vfat_file vfile;
-  struct wim_header header;
+  struct ventoy_wim_header header;
   struct wim_resource_header meta;
   struct wim_resource_header resource;
   void *buf = 0;
   int rc;
 
-  if (!wimfp || !wim_path || !buf_out || !size_out)
+  if (!wimfp || !ventoy_wim_path || !buf_out || !size_out)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, "invalid wim extraction arguments");
 
   grub_memset (&vfile, 0, sizeof (vfile));
   vfile.opaque = wimfp;
   vfile.len = grub_file_size (wimfp);
   vfile.xlen = vfile.len;
-  vfile.read = vfat_read_wrapper;
+  vfile.read = ventoy_vfat_read_wrapper;
 
-  rc = wim_header (&vfile, &header);
+  rc = ventoy_wim_header (&vfile, &header);
   if (rc != 0)
     return grub_error (GRUB_ERR_BAD_FS, "failed to parse WIM header");
 
-  rc = wim_metadata (&vfile, &header, boot_index, &meta);
+  rc = ventoy_wim_metadata (&vfile, &header, boot_index, &meta);
   if (rc != 0)
     return grub_error (GRUB_ERR_FILE_NOT_FOUND, "failed to locate WIM metadata");
 
-  rc = wim_file (&vfile, &header, &meta, wim_path, &resource);
+  rc = ventoy_wim_file (&vfile, &header, &meta, ventoy_wim_path, &resource);
   if (rc != 0)
     return grub_error (GRUB_ERR_FILE_NOT_FOUND, "failed to locate WIM file");
 
@@ -994,7 +1000,7 @@ grub_ventoy_windows_extract_wim_virtual_file (grub_file_t wimfp,
   if (!buf)
     return grub_errno;
 
-  rc = wim_read (&vfile, &header, &resource, buf, 0, resource.len);
+  rc = ventoy_wim_read (&vfile, &header, &resource, buf, 0, resource.len);
   if (rc != 0)
     {
       grub_free (buf);
@@ -1065,7 +1071,7 @@ grub_ventoy_windows_search_full_wim_dirent (void *meta_data,
 }
 
 static struct wim_lookup_entry *
-grub_ventoy_windows_find_lookup_entry (struct wim_header *header,
+grub_ventoy_windows_find_lookup_entry (struct ventoy_wim_header *header,
                                        struct wim_lookup_entry *lookup,
                                        struct wim_hash *hash)
 {
@@ -1080,7 +1086,7 @@ grub_ventoy_windows_find_lookup_entry (struct wim_header *header,
 
 static grub_err_t
 grub_ventoy_windows_read_resource (grub_file_t file,
-                                   struct wim_header *head,
+                                   struct ventoy_wim_header *head,
                                    struct wim_resource_header *resource,
                                    void **buffer)
 {
@@ -1092,13 +1098,13 @@ grub_ventoy_windows_read_resource (grub_file_t file,
   vfile.opaque = file;
   vfile.len = grub_file_size (file);
   vfile.xlen = vfile.len;
-  vfile.read = vfat_read_wrapper;
+  vfile.read = ventoy_vfat_read_wrapper;
 
   buf = grub_malloc (resource->len);
   if (!buf)
     return grub_errno;
 
-  rc = wim_read (&vfile, head, resource, buf, 0, resource->len);
+  rc = ventoy_wim_read (&vfile, head, resource, buf, 0, resource->len);
   if (rc != 0)
     {
       grub_free (buf);
@@ -1111,7 +1117,7 @@ grub_ventoy_windows_read_resource (grub_file_t file,
 
 static grub_err_t
 grub_ventoy_windows_parse_registry_setup_cmdline (grub_file_t file,
-                                                  struct wim_header *head,
+                                                  struct ventoy_wim_header *head,
                                                   struct wim_lookup_entry *lookup,
                                                   void *meta_data,
                                                   struct wim_directory_entry *dir,
@@ -1244,7 +1250,7 @@ grub_ventoy_windows_detect_launch_target (const char *prefix,
   static const char *const winpeshl_path[] = { "Windows", "System32", "winpeshl.exe", 0 };
   const char *custom_path[17] = { 0 };
   struct vfat_file vfile;
-  struct wim_header head;
+  struct ventoy_wim_header head;
   struct wim_resource_header meta;
   struct wim_directory_entry *rootdir;
   struct wim_directory_entry *search = 0;
@@ -1264,7 +1270,7 @@ grub_ventoy_windows_detect_launch_target (const char *prefix,
   if (!wim_full)
     return GRUB_ERR_NONE;
 
-  file = file_open (wim_full, 0, 0, 0);
+  file = grub_ventoy_windows_file_open (wim_full);
   if (!file)
     return grub_errno;
 
@@ -1272,10 +1278,10 @@ grub_ventoy_windows_detect_launch_target (const char *prefix,
   vfile.opaque = file;
   vfile.len = grub_file_size (file);
   vfile.xlen = vfile.len;
-  vfile.read = vfat_read_wrapper;
+  vfile.read = ventoy_vfat_read_wrapper;
 
-  if (wim_header (&vfile, &head) != 0 ||
-      wim_metadata (&vfile, &head, boot_index, &meta) != 0)
+  if (ventoy_wim_header (&vfile, &head) != 0 ||
+      ventoy_wim_metadata (&vfile, &head, boot_index, &meta) != 0)
     {
       grub_file_close (file);
       return grub_error (GRUB_ERR_BAD_FS, "failed to parse WIM boot metadata");
@@ -1292,8 +1298,8 @@ grub_ventoy_windows_detect_launch_target (const char *prefix,
       return grub_errno;
     }
 
-  if (wim_read (&vfile, &head, &meta, meta_data, 0, meta.len) != 0 ||
-      wim_read (&vfile, &head, &head.lookup, lookup, 0, lookup_len) != 0)
+  if (ventoy_wim_read (&vfile, &head, &meta, meta_data, 0, meta.len) != 0 ||
+      ventoy_wim_read (&vfile, &head, &head.lookup, lookup, 0, lookup_len) != 0)
     {
       grub_file_close (file);
       grub_free (meta_data);
@@ -1360,8 +1366,45 @@ grub_ventoy_windows_detect_launch_target (const char *prefix,
   launch_name[i] = '\0';
 
   if (custom_path[0])
-    launch_path = grub_xasprintf ("\\%s\\%s\\%s", custom_path[0], custom_path[1],
-                                  launch_name);
+    {
+      grub_size_t nseg = 0;
+      grub_size_t i_seg;
+      grub_size_t total = 2;
+      char *p;
+
+      while (custom_path[nseg])
+        nseg++;
+
+      if (nseg <= 1)
+        launch_path = grub_xasprintf ("\\%s", launch_name);
+      else
+        {
+          for (i_seg = 0; i_seg + 1 < nseg; i_seg++)
+            total += grub_strlen (custom_path[i_seg]) + 1;
+          total += grub_strlen (launch_name);
+
+          launch_path = grub_malloc (total);
+          if (!launch_path)
+            {
+              grub_file_close (file);
+              grub_free (meta_data);
+              grub_free (lookup);
+              grub_free (launch_name);
+              return grub_errno;
+            }
+
+          p = launch_path;
+          *p++ = '\\';
+          for (i_seg = 0; i_seg + 1 < nseg; i_seg++)
+            {
+              grub_size_t seg_len = grub_strlen (custom_path[i_seg]);
+              grub_memcpy (p, custom_path[i_seg], seg_len);
+              p += seg_len;
+              *p++ = '\\';
+            }
+          grub_snprintf (p, grub_strlen (launch_name) + 1, "%s", launch_name);
+        }
+    }
   else
     launch_path = grub_xasprintf ("\\Windows\\System32\\%s", launch_name);
 
@@ -1389,13 +1432,13 @@ grub_ventoy_windows_export_jump_payload (const char *prefix,
                                          const char *wim_full,
                                          unsigned int boot_index)
 {
-  grub_file_t wim_file = 0;
+  grub_file_t ventoy_wim_file = 0;
   grub_err_t err;
   void *orig_buf = 0;
   grub_size_t orig_size = 0;
   grub_uint64_t payload_size;
   char memname[96];
-  wchar_t wim_path[260];
+  wchar_t ventoy_wim_path[260];
   grub_size_t i;
 
   if (!prefix || !wim_full || !*wim_full || !grub_ventoy_windows_last_jump_bundle_buf)
@@ -1405,11 +1448,11 @@ grub_ventoy_windows_export_jump_payload (const char *prefix,
   grub_ventoy_windows_last_jump_payload_buf = 0;
   grub_ventoy_windows_last_jump_payload_size = 0;
 
-  wim_file = file_open (wim_full, 0, 0, 0);
-  if (!wim_file)
+  ventoy_wim_file = grub_ventoy_windows_file_open (wim_full);
+  if (!ventoy_wim_file)
     return grub_errno;
   grub_ventoy_windows_debug_u64 ("vtwindows-wim", "source_size",
-                                 grub_file_size (wim_file));
+                                 grub_file_size (ventoy_wim_file));
 
   if (!grub_ventoy_windows_last_launch_path)
     err = grub_ventoy_windows_detect_launch_target (prefix, wim_full, boot_index);
@@ -1417,17 +1460,17 @@ grub_ventoy_windows_export_jump_payload (const char *prefix,
     err = GRUB_ERR_NONE;
   if (err == GRUB_ERR_NONE)
     {
-      grub_memset (wim_path, 0, sizeof (wim_path));
+      grub_memset (ventoy_wim_path, 0, sizeof (ventoy_wim_path));
       for (i = 0;
            grub_ventoy_windows_last_launch_path[i] &&
-           i < (ARRAY_SIZE (wim_path) - 1);
+           i < (ARRAY_SIZE (ventoy_wim_path) - 1);
            i++)
-        wim_path[i] = (wchar_t) grub_ventoy_windows_last_launch_path[i];
-      err = grub_ventoy_windows_extract_wim_virtual_file (wim_file, boot_index,
-                                                          wim_path,
+        ventoy_wim_path[i] = (wchar_t) grub_ventoy_windows_last_launch_path[i];
+      err = grub_ventoy_windows_extract_wim_virtual_file (ventoy_wim_file, boot_index,
+                                                          ventoy_wim_path,
                                                           &orig_buf, &orig_size);
     }
-  grub_file_close (wim_file);
+  grub_file_close (ventoy_wim_file);
   if (err != GRUB_ERR_NONE)
     return err;
 
@@ -1465,7 +1508,7 @@ grub_ventoy_windows_export_patched_wim (const char *prefix,
                                         const char *wim_full,
                                         unsigned int boot_index)
 {
-  grub_file_t wim_file = 0;
+  grub_file_t ventoy_wim_file = 0;
   grub_err_t err;
   char memname[96];
 
@@ -1485,18 +1528,18 @@ grub_ventoy_windows_export_patched_wim (const char *prefix,
   if (!grub_ventoy_windows_last_launch_path || !*grub_ventoy_windows_last_launch_path)
     return grub_error (GRUB_ERR_FILE_NOT_FOUND, "missing WinPE launch file path");
 
-  wim_file = file_open (wim_full, 0, 0, 0);
-  if (!wim_file)
+  ventoy_wim_file = grub_ventoy_windows_file_open (wim_full);
+  if (!ventoy_wim_file)
     return grub_errno;
   grub_ventoy_windows_debug_u64 ("vtwindows-wim", "patch_source_size",
-                                 grub_file_size (wim_file));
-  err = grub_ventoy_wimpatch_apply (wim_file, boot_index,
+                                 grub_file_size (ventoy_wim_file));
+  err = grub_ventoy_wimpatch_apply (ventoy_wim_file, boot_index,
                                     grub_ventoy_windows_last_launch_path,
                                     grub_ventoy_windows_last_jump_payload_buf,
                                     grub_ventoy_windows_last_jump_payload_size,
                                     &grub_ventoy_windows_last_patched_wim_buf,
                                     &grub_ventoy_windows_last_patched_wim_size);
-  grub_file_close (wim_file);
+  grub_file_close (ventoy_wim_file);
   if (err != GRUB_ERR_NONE)
     return err;
 
@@ -1550,7 +1593,7 @@ grub_ventoy_windows_install_iso9660_override (const char *prefix,
       return GRUB_ERR_NONE;
     }
 
-  file = file_open (wim_full, 0, 0, 0);
+  file = grub_ventoy_windows_file_open (wim_full);
   if (!file)
     {
       grub_ventoy_windows_debug_string ("vtwindows-iso9660", "skip",
@@ -1749,7 +1792,7 @@ grub_ventoy_windows_install_udf_override (const char *prefix,
   grub_uint64_t file_size;
   grub_uint64_t remap_bytes;
   grub_uint64_t new_size64;
-  struct wim_header *patched_head;
+  struct ventoy_wim_header *patched_head;
   grub_uint64_t patched_lookup_off;
   grub_uint64_t patched_lookup_len;
   grub_uint64_t patched_boot_off;
@@ -1776,7 +1819,7 @@ grub_ventoy_windows_install_udf_override (const char *prefix,
       return GRUB_ERR_NONE;
     }
 
-  file = file_open (wim_full, 0, 0, 0);
+  file = grub_ventoy_windows_file_open (wim_full);
   if (!file)
     {
       grub_ventoy_windows_debug_string ("vtwindows-udf", "skip",
@@ -1823,7 +1866,7 @@ grub_ventoy_windows_install_udf_override (const char *prefix,
   mem_sectors = append_size / 2048;
   start_sector = (old_chain->real_img_size_in_bytes + 2047) / 2048;
   part_sectors = start_sector - start_block + remap_sectors + mem_sectors;
-  ad_file = file_open (wim_full, 0, 0, 0);
+  ad_file = grub_ventoy_windows_file_open (wim_full);
   if (!ad_file)
     return grub_errno;
   err = grub_ventoy_windows_fill_udf_ads (ad_file, attr_offset, start_block,
@@ -1868,7 +1911,7 @@ grub_ventoy_windows_install_udf_override (const char *prefix,
   grub_memcpy (ad, udf_ads, override[2].override_size);
 
   override[3].img_offset = file_offset;
-  override[3].override_size = sizeof (struct wim_header);
+  override[3].override_size = sizeof (struct ventoy_wim_header);
   grub_memcpy (override[3].override_data,
                grub_ventoy_windows_last_patched_wim_buf,
                override[3].override_size);
@@ -1886,7 +1929,7 @@ grub_ventoy_windows_install_udf_override (const char *prefix,
                  (char *) grub_ventoy_windows_last_patched_wim_buf + wim_align_size,
                  append_size);
 
-  patched_head = (struct wim_header *) grub_ventoy_windows_last_patched_wim_buf;
+  patched_head = (struct ventoy_wim_header *) grub_ventoy_windows_last_patched_wim_buf;
   patched_lookup_off = patched_head->lookup.offset;
   patched_lookup_len = patched_head->lookup.len;
   patched_boot_off = patched_head->boot.offset;
