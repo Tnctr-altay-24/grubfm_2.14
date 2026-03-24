@@ -602,15 +602,13 @@ grub_ventoy_windows_export_jump (const char *prefix, int pe64)
 {
   const char *const candidates64[] =
     {
-      "(hd2,msdos2)/ventoy/vtoyjump64.exe",
-      "(hd2,2)/ventoy/vtoyjump64.exe",
+      "(hd0,1)/ventoy/vtoyjump64.exe",
       "(ventoydisk)/ventoy/vtoyjump64.exe",
       0
     };
   const char *const candidates32[] =
     {
-      "(hd2,msdos2)/ventoy/vtoyjump32.exe",
-      "(hd2,2)/ventoy/vtoyjump32.exe",
+      "(hd0,1)/ventoy/vtoyjump32.exe",
       "(ventoydisk)/ventoy/vtoyjump32.exe",
       0
     };
@@ -3115,7 +3113,7 @@ grub_cmd_vtchainloadwin (grub_extcmd_context_t ctxt, int argc, char **args)
     }
 
   script = grub_xasprintf (
-      "chainloader (hd2,msdos2)/ventoy/ventoy_x64.efi %senv_param=%s %s FirstTry=%s %s\n"
+      "chainloader (hd0,1)/ventoy/ventoy_x64.efi %senv_param=%s %s FirstTry=%s %s\n"
       "boot\n",
       (consumer_debug && *consumer_debug) ? "debug " : "",
       env_param,
