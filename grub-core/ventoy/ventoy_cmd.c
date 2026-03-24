@@ -148,8 +148,8 @@ static const struct grub_ventoy_cmd_desc grub_ventoy_linux_cmds[] =
     "vtlinuxboot",
     grub_cmd_vtlinuxboot,
     0,
-    "[--var PREFIX] --kernel PATH --initrd PATH [--cmdline STRING] [--persistence FILE] [--inject FILE] [--template FILE] [--runtime FILE] [--runtime-arch FILE] [--format iso9660|udf] [--linux-cmd CMD] [--initrd-cmd CMD] [--loop-name NAME] FILE",
-    "Build Ventoy Linux metadata and directly boot using loopback + initrd chaining.",
+    "[--var PREFIX] [--kernel PATH] [--initrd PATH] [--cmdline STRING] [--persistence FILE] [--inject FILE] [--template FILE] [--runtime FILE] [--runtime-arch FILE] [--format iso9660|udf] [--linux-cmd CMD] [--initrd-cmd CMD] [--loop-name NAME] FILE",
+    "Build Ventoy Linux metadata and directly boot using loopback + initrd chaining (auto-detect kernel/initrd when omitted).",
     options_vtlinuxboot,
     &cmd_vtlinuxboot
   },

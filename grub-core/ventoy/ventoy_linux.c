@@ -214,6 +214,502 @@ grub_ventoy_linux_prepare_cmdline (const char *cmdline)
   return out;
 }
 
+static int
+grub_ventoy_linux_is_space (char ch)
+{
+  return (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n');
+}
+
+static char *
+grub_ventoy_linux_trim_left (char *line)
+{
+  while (line && *line && grub_ventoy_linux_is_space (*line))
+    line++;
+  return line;
+}
+
+static void
+grub_ventoy_linux_trim_right (char *line)
+{
+  grub_size_t len;
+
+  if (!line)
+    return;
+
+  len = grub_strlen (line);
+  while (len > 0 && grub_ventoy_linux_is_space (line[len - 1]))
+    line[--len] = '\0';
+}
+
+static const char *
+grub_ventoy_linux_match_keyword (const char *line, const char *keyword)
+{
+  grub_size_t len;
+  const char *cur;
+
+  if (!line || !keyword)
+    return 0;
+
+  len = grub_strlen (keyword);
+  if (grub_strncmp (line, keyword, len) != 0)
+    return 0;
+
+  if (line[len] && !grub_ventoy_linux_is_space (line[len]))
+    return 0;
+
+  cur = line + len;
+  while (*cur && grub_ventoy_linux_is_space (*cur))
+    cur++;
+  return cur;
+}
+
+static char *
+grub_ventoy_linux_dup_token (const char *input, const char **next)
+{
+  const char *start;
+  const char *end;
+  char quote = 0;
+  char *token;
+  grub_size_t len;
+
+  if (!input)
+    return 0;
+
+  while (*input && grub_ventoy_linux_is_space (*input))
+    input++;
+  if (!*input)
+    {
+      if (next)
+        *next = input;
+      return 0;
+    }
+
+  start = input;
+  if (*input == '\'' || *input == '"')
+    {
+      quote = *input++;
+      start = input;
+      while (*input && *input != quote)
+        input++;
+      end = input;
+      if (*input == quote)
+        input++;
+    }
+  else
+    {
+      while (*input && !grub_ventoy_linux_is_space (*input))
+        input++;
+      end = input;
+    }
+
+  while (*input && grub_ventoy_linux_is_space (*input))
+    input++;
+
+  len = (grub_size_t) (end - start);
+  token = grub_malloc (len + 1);
+  if (!token)
+    {
+      if (next)
+        *next = input;
+      return 0;
+    }
+
+  if (len)
+    grub_memcpy (token, start, len);
+  token[len] = '\0';
+
+  if (next)
+    *next = input;
+  return token;
+}
+
+static char *
+grub_ventoy_linux_join_relpath (const char *cfg_path, const char *path)
+{
+  const char *slash;
+  grub_size_t dirlen;
+
+  if (!path || !*path)
+    return 0;
+
+  while (path[0] == '.' && path[1] == '/')
+    path += 2;
+
+  if (path[0] == '/' || path[0] == '(')
+    return grub_strdup (path);
+
+  if (!cfg_path)
+    return grub_xasprintf ("/%s", path);
+
+  slash = grub_strrchr (cfg_path, '/');
+  if (!slash)
+    return grub_xasprintf ("/%s", path);
+
+  dirlen = (grub_size_t) (slash - cfg_path);
+  if (dirlen == 0)
+    return grub_xasprintf ("/%s", path);
+
+  return grub_xasprintf ("%.*s/%s", (int) dirlen, cfg_path, path);
+}
+
+static char *
+grub_ventoy_linux_read_text_file (const char *path)
+{
+  grub_file_t file;
+  grub_uint64_t size64;
+  grub_size_t size;
+  grub_ssize_t readlen;
+  char *buf;
+
+  file = grub_file_open (path, GRUB_FILE_TYPE_GET_SIZE);
+  if (!file)
+    {
+      grub_errno = GRUB_ERR_NONE;
+      return 0;
+    }
+
+  size64 = grub_file_size (file);
+  size = (grub_size_t) size64;
+  buf = grub_malloc (size + 1);
+  if (!buf)
+    {
+      grub_file_close (file);
+      return 0;
+    }
+
+  readlen = grub_file_read (file, buf, size);
+  grub_file_close (file);
+  if (readlen < 0)
+    {
+      grub_free (buf);
+      return 0;
+    }
+
+  buf[(grub_size_t) readlen] = '\0';
+  return buf;
+}
+
+static void
+grub_ventoy_linux_parse_append_line (const char *append, const char *cfg_path,
+                                     char **out_cmdline, char **out_initrd)
+{
+  const char *cur;
+  char *token;
+  char *cmdline = 0;
+
+  if (!append)
+    return;
+
+  cur = append;
+  while ((token = grub_ventoy_linux_dup_token (cur, &cur)) != 0)
+    {
+      if (grub_strncmp (token, "initrd=", 7) == 0)
+        {
+          char *value = token + 7;
+          char *comma = grub_strchr (value, ',');
+
+          if (comma)
+            *comma = '\0';
+          if (!*out_initrd && *value)
+            *out_initrd = grub_ventoy_linux_join_relpath (cfg_path, value);
+          grub_free (token);
+          continue;
+        }
+
+      if (*token)
+        {
+          if (!cmdline)
+            cmdline = grub_strdup (token);
+          else
+            {
+              char *joined = grub_xasprintf ("%s %s", cmdline, token);
+              grub_free (cmdline);
+              cmdline = joined;
+            }
+        }
+
+      grub_free (token);
+      if (!cmdline && grub_errno != GRUB_ERR_NONE)
+        break;
+    }
+
+  if (cmdline)
+    {
+      if (!*out_cmdline)
+        *out_cmdline = cmdline;
+      else
+        grub_free (cmdline);
+    }
+}
+
+static int
+grub_ventoy_linux_parse_grub_cfg_text (const char *cfg_path, char *buf,
+                                       char **out_kernel, char **out_initrd,
+                                       char **out_cmdline)
+{
+  char *line;
+
+  if (!buf || !out_kernel || !out_initrd || !out_cmdline)
+    return 0;
+
+  line = buf;
+  while (line && *line)
+    {
+      char *next = grub_strchr (line, '\n');
+      char *start;
+      const char *payload;
+
+      if (next)
+        *next++ = '\0';
+
+      start = grub_ventoy_linux_trim_left (line);
+      grub_ventoy_linux_trim_right (start);
+
+      if (*start == '\0' || *start == '#')
+        {
+          line = next;
+          continue;
+        }
+
+      payload = grub_ventoy_linux_match_keyword (start, "linux");
+      if (!payload)
+        payload = grub_ventoy_linux_match_keyword (start, "linuxefi");
+      if (!payload)
+        payload = grub_ventoy_linux_match_keyword (start, "linux16");
+
+      if (payload)
+        {
+          const char *remain = payload;
+          char *token = grub_ventoy_linux_dup_token (remain, &remain);
+          if (token)
+            {
+              if (!*out_kernel)
+                *out_kernel = grub_ventoy_linux_join_relpath (cfg_path, token);
+              if (!*out_cmdline && remain && *remain)
+                *out_cmdline = grub_strdup (remain);
+              grub_free (token);
+            }
+        }
+      else
+        {
+          payload = grub_ventoy_linux_match_keyword (start, "initrd");
+          if (!payload)
+            payload = grub_ventoy_linux_match_keyword (start, "initrdefi");
+          if (!payload)
+            payload = grub_ventoy_linux_match_keyword (start, "initrd16");
+
+          if (payload && !*out_initrd)
+            {
+              const char *remain = payload;
+              char *token = grub_ventoy_linux_dup_token (remain, &remain);
+              if (token)
+                {
+                  *out_initrd = grub_ventoy_linux_join_relpath (cfg_path, token);
+                  grub_free (token);
+                }
+            }
+        }
+
+      if (*out_kernel && *out_initrd)
+        return 1;
+
+      line = next;
+    }
+
+  return 0;
+}
+
+static int
+grub_ventoy_linux_parse_syslinux_cfg_text (const char *cfg_path, char *buf,
+                                           char **out_kernel, char **out_initrd,
+                                           char **out_cmdline)
+{
+  char *line;
+
+  if (!buf || !out_kernel || !out_initrd || !out_cmdline)
+    return 0;
+
+  line = buf;
+  while (line && *line)
+    {
+      char *next = grub_strchr (line, '\n');
+      char *start;
+      const char *payload;
+
+      if (next)
+        *next++ = '\0';
+
+      start = grub_ventoy_linux_trim_left (line);
+      grub_ventoy_linux_trim_right (start);
+
+      if (*start == '\0' || *start == '#')
+        {
+          line = next;
+          continue;
+        }
+
+      payload = grub_ventoy_linux_match_keyword (start, "kernel");
+      if (!payload)
+        payload = grub_ventoy_linux_match_keyword (start, "linux");
+      if (payload && !*out_kernel)
+        {
+          const char *remain = payload;
+          char *token = grub_ventoy_linux_dup_token (remain, &remain);
+          if (token)
+            {
+              *out_kernel = grub_ventoy_linux_join_relpath (cfg_path, token);
+              grub_free (token);
+            }
+        }
+
+      payload = grub_ventoy_linux_match_keyword (start, "append");
+      if (payload)
+        grub_ventoy_linux_parse_append_line (payload, cfg_path, out_cmdline,
+                                             out_initrd);
+
+      payload = grub_ventoy_linux_match_keyword (start, "initrd");
+      if (payload && !*out_initrd)
+        {
+          const char *remain = payload;
+          char *token = grub_ventoy_linux_dup_token (remain, &remain);
+          if (token)
+            {
+              *out_initrd = grub_ventoy_linux_join_relpath (cfg_path, token);
+              grub_free (token);
+            }
+        }
+
+      if (*out_kernel && *out_initrd)
+        return 1;
+
+      line = next;
+    }
+
+  return 0;
+}
+
+enum grub_ventoy_linux_cfg_kind
+  {
+    GRUB_VTOY_CFG_GRUB = 0,
+    GRUB_VTOY_CFG_SYSLINUX = 1
+  };
+
+static int
+grub_ventoy_linux_try_cfg_path (const char *loop_name, const char *cfg_path,
+                                enum grub_ventoy_linux_cfg_kind kind,
+                                char **out_kernel, char **out_initrd,
+                                char **out_cmdline)
+{
+  char *full_path;
+  char *buf;
+  int found = 0;
+  char *kernel = 0;
+  char *initrd = 0;
+  char *cmdline = 0;
+
+  full_path = grub_xasprintf ("(%s)%s", loop_name, cfg_path);
+  if (!full_path)
+    return 0;
+
+  buf = grub_ventoy_linux_read_text_file (full_path);
+  grub_free (full_path);
+  if (!buf)
+    return 0;
+
+  if (kind == GRUB_VTOY_CFG_GRUB)
+    found = grub_ventoy_linux_parse_grub_cfg_text (cfg_path, buf,
+                                                   &kernel, &initrd,
+                                                   &cmdline);
+  else
+    found = grub_ventoy_linux_parse_syslinux_cfg_text (cfg_path, buf,
+                                                       &kernel, &initrd,
+                                                       &cmdline);
+
+  grub_free (buf);
+
+  if (!found)
+    {
+      grub_free (kernel);
+      grub_free (initrd);
+      grub_free (cmdline);
+      return 0;
+    }
+
+  if (!*out_kernel)
+    *out_kernel = kernel;
+  else
+    grub_free (kernel);
+
+  if (!*out_initrd)
+    *out_initrd = initrd;
+  else
+    grub_free (initrd);
+
+  if (!*out_cmdline)
+    *out_cmdline = cmdline;
+  else
+    grub_free (cmdline);
+
+  return found;
+}
+
+static int
+grub_ventoy_linux_autodetect_entry (const char *image, const char *loop_name,
+                                    char **out_kernel, char **out_initrd,
+                                    char **out_cmdline)
+{
+  static const char *grub_cfgs[] =
+    {
+      "/boot/grub/grub.cfg",
+      "/grub/grub.cfg",
+      "/grub2/grub.cfg",
+      "/EFI/BOOT/grub.cfg"
+    };
+  static const char *syslinux_cfgs[] =
+    {
+      "/isolinux/isolinux.cfg",
+      "/syslinux/syslinux.cfg",
+      "/boot/isolinux/isolinux.cfg"
+    };
+  char *loop_cmd;
+  grub_err_t err;
+  grub_size_t i;
+
+  if (!image || !loop_name || !out_kernel || !out_initrd || !out_cmdline)
+    return 0;
+
+  loop_cmd = grub_xasprintf ("loopback %s %s", loop_name, image);
+  if (!loop_cmd)
+    return 0;
+
+  err = grub_parser_execute (loop_cmd);
+  grub_free (loop_cmd);
+  if (err != GRUB_ERR_NONE)
+    return 0;
+
+  for (i = 0; i < sizeof (grub_cfgs) / sizeof (grub_cfgs[0]); i++)
+    {
+      if (grub_ventoy_linux_try_cfg_path (loop_name, grub_cfgs[i],
+                                          GRUB_VTOY_CFG_GRUB,
+                                          out_kernel, out_initrd,
+                                          out_cmdline))
+        return 1;
+      grub_errno = GRUB_ERR_NONE;
+    }
+
+  for (i = 0; i < sizeof (syslinux_cfgs) / sizeof (syslinux_cfgs[0]); i++)
+    {
+      if (grub_ventoy_linux_try_cfg_path (loop_name, syslinux_cfgs[i],
+                                          GRUB_VTOY_CFG_SYSLINUX,
+                                          out_kernel, out_initrd,
+                                          out_cmdline))
+        return 1;
+      grub_errno = GRUB_ERR_NONE;
+    }
+
+  return 0;
+}
+
 static const struct grub_arg_option options_vtlinux[] =
   {
     {"var", 'v', 0, N_("Environment variable prefix that receives exported values."),
@@ -1142,20 +1638,25 @@ static grub_err_t
 grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
 {
   struct grub_arg_list *state = ctxt ? ctxt->state : 0;
+  grub_err_t ret = GRUB_ERR_NONE;
   const char *prefix;
   const char *kernel;
   const char *initrd;
+  const char *cmdline_input;
   const char *linux_cmd;
   const char *initrd_cmd;
   const char *loop_name;
   const char *runtime;
   const char *runtime_arch;
-  char *effective_cmdline;
-  char *vtlinux_cmd;
-  char *script;
-  char *boot_script;
+  char *auto_kernel = 0;
+  char *auto_initrd = 0;
+  char *auto_cmdline = 0;
+  char *effective_cmdline = 0;
+  char *vtlinux_cmd = 0;
+  char *script = 0;
+  char *boot_script = 0;
   char *newbuf;
-  grub_err_t err;
+  grub_err_t err = GRUB_ERR_NONE;
 
   if (argc != 1)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, "filename expected");
@@ -1163,6 +1664,7 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
   prefix = (state && state[VTLINUXBOOT_VAR].set) ? state[VTLINUXBOOT_VAR].arg : "vt_linux";
   kernel = (state && state[VTLINUXBOOT_KERNEL].set) ? state[VTLINUXBOOT_KERNEL].arg : 0;
   initrd = (state && state[VTLINUXBOOT_INITRD].set) ? state[VTLINUXBOOT_INITRD].arg : 0;
+  cmdline_input = (state && state[VTLINUXBOOT_CMDLINE].set) ? state[VTLINUXBOOT_CMDLINE].arg : 0;
   linux_cmd = (state && state[VTLINUXBOOT_LINUX_CMD].set) ? state[VTLINUXBOOT_LINUX_CMD].arg : "linux";
   initrd_cmd = (state && state[VTLINUXBOOT_INITRD_CMD].set) ? state[VTLINUXBOOT_INITRD_CMD].arg : "initrd";
   loop_name = (state && state[VTLINUXBOOT_LOOP_NAME].set) ? state[VTLINUXBOOT_LOOP_NAME].arg : "vtiso";
@@ -1170,20 +1672,45 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
                                                "ventoy_linux_runtime");
   runtime_arch = grub_ventoy_linux_get_runtime_arg (state, VTLINUXBOOT_RUNTIME_ARCH,
                                                     "ventoy_linux_runtime_arch");
-  effective_cmdline = grub_ventoy_linux_prepare_cmdline (
-      (state && state[VTLINUXBOOT_CMDLINE].set) ? state[VTLINUXBOOT_CMDLINE].arg : 0);
 
   if (!kernel || !initrd)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT, "kernel and initrd must be specified");
+    {
+      if (!grub_ventoy_linux_autodetect_entry (args[0], loop_name,
+                                               &auto_kernel, &auto_initrd,
+                                               &auto_cmdline))
+        {
+          ret = grub_error (GRUB_ERR_BAD_ARGUMENT,
+                            "failed to auto-detect kernel/initrd from %s", args[0]);
+          goto out;
+        }
+
+      if (!kernel)
+        kernel = auto_kernel;
+      if (!initrd)
+        initrd = auto_initrd;
+      if (!cmdline_input && auto_cmdline)
+        cmdline_input = auto_cmdline;
+    }
+
+  if (!kernel || !initrd)
+    {
+      ret = grub_error (GRUB_ERR_BAD_ARGUMENT, "kernel and initrd must be specified");
+      goto out;
+    }
+
+  effective_cmdline = grub_ventoy_linux_prepare_cmdline (cmdline_input);
   if (!effective_cmdline)
-    return grub_errno;
+    {
+      ret = grub_errno;
+      goto out;
+    }
 
   vtlinux_cmd = grub_xasprintf ("vt_linux_chain_data --var %s --kernel %s --initrd %s",
                                 prefix, kernel, initrd);
   if (!vtlinux_cmd)
     {
-      grub_free (effective_cmdline);
-      return grub_errno;
+      ret = grub_errno;
+      goto out;
     }
 
   if (runtime)
@@ -1193,8 +1720,8 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
       vtlinux_cmd = newbuf;
       if (!vtlinux_cmd)
         {
-          grub_free (effective_cmdline);
-          return grub_errno;
+          ret = grub_errno;
+          goto out;
         }
     }
 
@@ -1205,8 +1732,8 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
       vtlinux_cmd = newbuf;
       if (!vtlinux_cmd)
         {
-          grub_free (effective_cmdline);
-          return grub_errno;
+          ret = grub_errno;
+          goto out;
         }
     }
   newbuf = grub_xasprintf ("%s --cmdline \"%s\"", vtlinux_cmd, effective_cmdline);
@@ -1214,8 +1741,8 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
   vtlinux_cmd = newbuf;
   if (!vtlinux_cmd)
     {
-      grub_free (effective_cmdline);
-      return grub_errno;
+      ret = grub_errno;
+      goto out;
     }
 
   if (state && state[VTLINUXBOOT_PERSISTENCE].set)
@@ -1226,8 +1753,8 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
       vtlinux_cmd = newbuf;
       if (!vtlinux_cmd)
         {
-          grub_free (effective_cmdline);
-          return grub_errno;
+          ret = grub_errno;
+          goto out;
         }
     }
 
@@ -1239,8 +1766,8 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
       vtlinux_cmd = newbuf;
       if (!vtlinux_cmd)
         {
-          grub_free (effective_cmdline);
-          return grub_errno;
+          ret = grub_errno;
+          goto out;
         }
     }
 
@@ -1252,8 +1779,8 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
       vtlinux_cmd = newbuf;
       if (!vtlinux_cmd)
         {
-          grub_free (effective_cmdline);
-          return grub_errno;
+          ret = grub_errno;
+          goto out;
         }
     }
 
@@ -1265,17 +1792,18 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
       vtlinux_cmd = newbuf;
       if (!vtlinux_cmd)
         {
-          grub_free (effective_cmdline);
-          return grub_errno;
+          ret = grub_errno;
+          goto out;
         }
     }
 
   script = grub_xasprintf ("%s %s", vtlinux_cmd, args[0]);
   grub_free (vtlinux_cmd);
+  vtlinux_cmd = 0;
   if (!script)
     {
-      grub_free (effective_cmdline);
-      return grub_errno;
+      ret = grub_errno;
+      goto out;
     }
 
   boot_script = grub_xasprintf (
@@ -1289,9 +1817,8 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
       initrd_cmd, prefix, prefix, prefix, prefix);
   if (!boot_script)
     {
-      grub_free (script);
-      grub_free (effective_cmdline);
-      return grub_errno;
+      ret = grub_errno;
+      goto out;
     }
 
   grub_ventoy_linux_debug_string ("vtlinuxboot", "arg_image", args[0]);
@@ -1303,10 +1830,18 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
   err = grub_parser_execute (script);
   if (err == GRUB_ERR_NONE)
     err = grub_parser_execute (boot_script);
+
+  ret = err;
+
+out:
   grub_free (boot_script);
   grub_free (script);
+  grub_free (vtlinux_cmd);
   grub_free (effective_cmdline);
-  return err;
+  grub_free (auto_kernel);
+  grub_free (auto_initrd);
+  grub_free (auto_cmdline);
+  return ret;
 }
 
 #include "ventoy_unix.c"
