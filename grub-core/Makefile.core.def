@@ -1286,7 +1286,7 @@ module = {
 
 module = {
   name = ventoylinux;
-  common = ventoy/linux.c;
+  common = ventoy/ventoy_linux.c;
 
   cflags = '-Wno-strict-aliasing -fshort-wchar';
   cppflags = '-I$(srcdir)/map/include';
@@ -1297,7 +1297,7 @@ module = {
 
 module = {
   name = ventoywindows;
-  common = ventoy/windows.c;
+  common = ventoy/ventoy_windows.c;
   common = ventoy/ventoy_wimpatch.c;
   common = ventoy/ventoy_huffman.c;
   common = ventoy/ventoy_lzx.c;
