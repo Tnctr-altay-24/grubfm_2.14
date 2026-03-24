@@ -24,6 +24,7 @@
 #include <wim.h>
 #include <wimboot.h>
 #include <wimpatch.h>
+#include "ventoy_wimpatch.h"
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
@@ -954,73 +955,6 @@ grub_ventoy_windows_export_jump_bundle (const char *prefix, ventoy_chain_head *c
   return grub_ventoy_windows_export_u64 (prefix, "jump_bundle_size", bundle_size);
 }
 
-static void
-grub_ventoy_windows_vfat_mem_read (struct vfat_file *file, void *data,
-                                   size_t offset, size_t len)
-{
-  grub_memcpy (data, (char *) file->opaque + offset, len);
-}
-
-static struct vfat_file *
-grub_ventoy_windows_init_mem_vfat_file (struct vfat_file *file,
-                                        const char *name,
-                                        void *opaque,
-                                        grub_size_t len,
-                                        void (*read_cb) (struct vfat_file *file,
-                                                         void *data,
-                                                         size_t offset,
-                                                         size_t read_len))
-{
-  if (!file || !name || !read_cb)
-    return 0;
-
-  grub_memset (file, 0, sizeof (*file));
-  grub_snprintf (file->name, sizeof (file->name), "%s", name);
-  file->opaque = opaque;
-  file->len = len;
-  file->xlen = len;
-  file->read = read_cb;
-  return file;
-}
-
-static grub_err_t
-grub_ventoy_windows_materialize_vfat_file (struct vfat_file *vfile,
-                                           void **buf_out, grub_size_t *size_out)
-{
-  grub_size_t offset;
-  grub_size_t chunk;
-  char *buf;
-
-  if (!vfile || !vfile->read || !buf_out || !size_out)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT, "invalid vfat materialize arguments");
-
-  buf = grub_zalloc (vfile->xlen);
-  if (!buf)
-    return grub_errno;
-
-  for (offset = 0; offset < vfile->xlen; offset += chunk)
-    {
-      chunk = vfile->xlen - offset;
-      if (chunk > 4096)
-        chunk = 4096;
-
-      if (offset < vfile->len)
-        {
-          grub_size_t copy_len = vfile->len - offset;
-          if (copy_len > chunk)
-            copy_len = chunk;
-          vfile->read (vfile, buf + offset, offset, copy_len);
-        }
-
-      if (vfile->patch)
-        vfile->patch (vfile, buf + offset, offset, chunk);
-    }
-
-  *buf_out = buf;
-  *size_out = vfile->xlen;
-  return GRUB_ERR_NONE;
-}
-
 static grub_err_t
 grub_ventoy_windows_extract_wim_virtual_file (grub_file_t wimfp,
                                               unsigned int boot_index,
@@ -1531,14 +1465,9 @@ grub_ventoy_windows_export_patched_wim (const char *prefix,
                                         const char *wim_full,
                                         unsigned int boot_index)
 {
-  struct wimboot_cmdline cmd;
-  struct vfat_file wim_vfile;
-  struct vfat_file replace_file;
   grub_file_t wim_file = 0;
   grub_err_t err;
   char memname[96];
-  grub_size_t i;
-  wchar_t replace_path[260];
 
   if (!prefix || !wim_full || !*wim_full || !grub_ventoy_windows_last_jump_payload_buf)
     return GRUB_ERR_NONE;
@@ -1561,33 +1490,12 @@ grub_ventoy_windows_export_patched_wim (const char *prefix,
     return grub_errno;
   grub_ventoy_windows_debug_u64 ("vtwindows-wim", "patch_source_size",
                                  grub_file_size (wim_file));
-
-  grub_ventoy_windows_init_mem_vfat_file (&wim_vfile, "boot.wim", wim_file,
-                                          grub_file_size (wim_file),
-                                          vfat_read_wrapper);
-  grub_ventoy_windows_init_mem_vfat_file (&replace_file, "ventoy_jump.bin",
-                                          grub_ventoy_windows_last_jump_payload_buf,
-                                          grub_ventoy_windows_last_jump_payload_size,
-                                          grub_ventoy_windows_vfat_mem_read);
-
-  grub_memset (&cmd, 0, sizeof (cmd));
-  cmd.index = boot_index;
-  cmd.rawwim = 1;
-  cmd.replace = 1;
-  for (i = 0;
-       grub_ventoy_windows_last_launch_path[i] &&
-       i < (ARRAY_SIZE (replace_path) - 1);
-       i++)
-    replace_path[i] = (wchar_t) grub_ventoy_windows_last_launch_path[i];
-  replace_path[i] = 0;
-  grub_memcpy (cmd.replace_path, replace_path, sizeof (cmd.replace_path));
-  cmd.replace_vfile = &replace_file;
-  set_wim_patch (&cmd);
-  vfat_patch_file (&wim_vfile, patch_wim);
-
-  err = grub_ventoy_windows_materialize_vfat_file (&wim_vfile,
-                                                   &grub_ventoy_windows_last_patched_wim_buf,
-                                                   &grub_ventoy_windows_last_patched_wim_size);
+  err = grub_ventoy_wimpatch_apply (wim_file, boot_index,
+                                    grub_ventoy_windows_last_launch_path,
+                                    grub_ventoy_windows_last_jump_payload_buf,
+                                    grub_ventoy_windows_last_jump_payload_size,
+                                    &grub_ventoy_windows_last_patched_wim_buf,
+                                    &grub_ventoy_windows_last_patched_wim_size);
   grub_file_close (wim_file);
   if (err != GRUB_ERR_NONE)
     return err;

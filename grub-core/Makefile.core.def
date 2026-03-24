@@ -1298,6 +1298,7 @@ module = {
 module = {
   name = ventoywindows;
   common = ventoy/windows.c;
+  common = ventoy/ventoy_wimpatch.c;
 
   cflags = '-Wno-strict-aliasing -fshort-wchar';
   cppflags = '-I$(srcdir)/map/include';
