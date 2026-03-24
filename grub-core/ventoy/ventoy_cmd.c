@@ -52,6 +52,11 @@ grub_ventoy_cmd_unregister_all (const struct grub_ventoy_cmd_desc *cmds,
 static grub_extcmd_t cmd_vtinfo;
 static grub_extcmd_t cmd_vtchunk;
 static grub_extcmd_t cmd_vtchain;
+static grub_extcmd_t cmd_vt_load_plugin;
+static grub_extcmd_t cmd_vt_check_plugin_json;
+static grub_extcmd_t cmd_vt_select_auto_install;
+static grub_extcmd_t cmd_vt_select_persistence;
+static grub_extcmd_t cmd_vt_select_conf_replace;
 
 static const struct grub_ventoy_cmd_desc grub_ventoy_core_cmds[] =
 {
@@ -81,6 +86,51 @@ static const struct grub_ventoy_cmd_desc grub_ventoy_core_cmds[] =
     "Build a ventoy chain blob and export its mem: path.",
     options_vtchain,
     &cmd_vtchain
+  },
+  {
+    "vt_load_plugin",
+    grub_cmd_vt_load_plugin,
+    0,
+    "ISODISK [JSON_PATH]",
+    "Load ventoy plugin json from target disk.",
+    0,
+    &cmd_vt_load_plugin
+  },
+  {
+    "vt_check_plugin_json",
+    grub_cmd_vt_check_plugin_json,
+    0,
+    "ISODISK [JSON_PATH]",
+    "Parse and validate ventoy plugin json syntax.",
+    0,
+    &cmd_vt_check_plugin_json
+  },
+  {
+    "vt_select_auto_install",
+    grub_cmd_vt_select_auto_install,
+    0,
+    "ISO_PATH [INDEX]",
+    "Select auto-install template for current image.",
+    0,
+    &cmd_vt_select_auto_install
+  },
+  {
+    "vt_select_persistence",
+    grub_cmd_vt_select_persistence,
+    0,
+    "ISO_PATH [INDEX]",
+    "Select persistence backend for current image.",
+    0,
+    &cmd_vt_select_persistence
+  },
+  {
+    "vt_select_conf_replace",
+    grub_cmd_vt_select_conf_replace,
+    0,
+    "ISO_PATH",
+    "Collect conf_replace records for current image.",
+    0,
+    &cmd_vt_select_conf_replace
   }
 };
 
