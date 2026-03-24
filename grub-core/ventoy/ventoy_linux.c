@@ -1309,12 +1309,15 @@ grub_cmd_vtlinuxboot (grub_extcmd_context_t ctxt, int argc, char **args)
   return err;
 }
 
+#include "ventoy_unix.c"
+
 #define GRUB_VTOY_CMD_SECTION_LINUX
 #include "ventoy_cmd.c"
 #undef GRUB_VTOY_CMD_SECTION_LINUX
 
 GRUB_MOD_INIT(ventoylinux)
 {
+  grub_ventoy_unix_init ();
   grub_ventoy_cmd_init_linux ();
 }
 
@@ -1332,5 +1335,6 @@ GRUB_MOD_FINI(ventoylinux)
   grub_free (grub_ventoy_linux_last_runtime_arch_buf);
   grub_ventoy_linux_last_runtime_arch_buf = 0;
   grub_ventoy_linux_last_runtime_arch_size = 0;
+  grub_ventoy_unix_fini ();
   grub_ventoy_cmd_fini_linux ();
 }

@@ -104,6 +104,24 @@ grub_ventoy_cmd_fini_core (void)
 #ifdef GRUB_VTOY_CMD_SECTION_LINUX
 static grub_extcmd_t cmd_vtlinux;
 static grub_extcmd_t cmd_vtlinuxboot;
+static grub_extcmd_t cmd_vt_parse_freenas_ver;
+static grub_extcmd_t cmd_vt_unix_parse_freebsd_ver;
+static grub_extcmd_t cmd_vt_unix_parse_freebsd_ver_elf;
+static grub_extcmd_t cmd_vt_unix_reset;
+static grub_extcmd_t cmd_vt_unix_check_vlnk;
+static grub_extcmd_t cmd_vt_unix_replace_conf;
+static grub_extcmd_t cmd_vt_unix_replace_grub_conf;
+static grub_extcmd_t cmd_vt_unix_replace_ko;
+static grub_extcmd_t cmd_vt_unix_ko_fillmap;
+static grub_extcmd_t cmd_vt_unix_fill_image_desc;
+static grub_extcmd_t cmd_vt_unix_gzip_new_ko;
+static grub_extcmd_t cmd_vt_unix_chain_data;
+static grub_extcmd_t cmd_vt_vlnk_check;
+static grub_extcmd_t cmd_vt_vlnk_dump_part;
+static grub_extcmd_t cmd_vt_is_vlnk_name;
+static grub_extcmd_t cmd_vt_get_vlnk_dst;
+static grub_extcmd_t cmd_vt_set_fake_vlnk;
+static grub_extcmd_t cmd_vt_reset_fake_vlnk;
 
 static const struct grub_ventoy_cmd_desc grub_ventoy_linux_cmds[] =
 {
@@ -124,7 +142,25 @@ static const struct grub_ventoy_cmd_desc grub_ventoy_linux_cmds[] =
     "Build Ventoy Linux metadata and directly boot using loopback + initrd chaining.",
     options_vtlinuxboot,
     &cmd_vtlinuxboot
-  }
+  },
+  {"vt_parse_freenas_ver", grub_cmd_vt_parse_freenas_ver, 0, "", "", 0, &cmd_vt_parse_freenas_ver},
+  {"vt_unix_parse_freebsd_ver", grub_cmd_vt_unix_parse_freebsd_ver, 0, "", "", 0, &cmd_vt_unix_parse_freebsd_ver},
+  {"vt_unix_parse_freebsd_ver_elf", grub_cmd_vt_unix_parse_freebsd_ver_elf, 0, "", "", 0, &cmd_vt_unix_parse_freebsd_ver_elf},
+  {"vt_unix_reset", grub_cmd_vt_unix_reset, 0, "", "", 0, &cmd_vt_unix_reset},
+  {"vt_unix_check_vlnk", grub_cmd_vt_unix_check_vlnk, 0, "", "", 0, &cmd_vt_unix_check_vlnk},
+  {"vt_unix_replace_conf", grub_cmd_vt_unix_replace_conf, 0, "", "", 0, &cmd_vt_unix_replace_conf},
+  {"vt_unix_replace_grub_conf", grub_cmd_vt_unix_replace_grub_conf, 0, "", "", 0, &cmd_vt_unix_replace_grub_conf},
+  {"vt_unix_replace_ko", grub_cmd_vt_unix_replace_ko, 0, "", "", 0, &cmd_vt_unix_replace_ko},
+  {"vt_unix_ko_fillmap", grub_cmd_vt_unix_ko_fillmap, 0, "", "", 0, &cmd_vt_unix_ko_fillmap},
+  {"vt_unix_fill_image_desc", grub_cmd_vt_unix_fill_image_desc, 0, "", "", 0, &cmd_vt_unix_fill_image_desc},
+  {"vt_unix_gzip_new_ko", grub_cmd_vt_unix_gzip_new_ko, 0, "", "", 0, &cmd_vt_unix_gzip_new_ko},
+  {"vt_unix_chain_data", grub_cmd_vt_unix_chain_data, 0, "", "", 0, &cmd_vt_unix_chain_data},
+  {"vt_vlnk_check", grub_cmd_vt_vlnk_check, 0, "", "", 0, &cmd_vt_vlnk_check},
+  {"vt_vlnk_dump_part", grub_cmd_vt_vlnk_dump_part, 0, "", "", 0, &cmd_vt_vlnk_dump_part},
+  {"vt_is_vlnk_name", grub_cmd_vt_is_vlnk_name, 0, "", "", 0, &cmd_vt_is_vlnk_name},
+  {"vt_get_vlnk_dst", grub_cmd_vt_get_vlnk_dst, 0, "", "", 0, &cmd_vt_get_vlnk_dst},
+  {"vt_set_fake_vlnk", grub_cmd_vt_set_fake_vlnk, 0, "", "", 0, &cmd_vt_set_fake_vlnk},
+  {"vt_reset_fake_vlnk", grub_cmd_vt_reset_fake_vlnk, 0, "", "", 0, &cmd_vt_reset_fake_vlnk}
 };
 
 static void
