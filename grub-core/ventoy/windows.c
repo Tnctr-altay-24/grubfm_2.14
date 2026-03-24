@@ -346,6 +346,9 @@ grub_ventoy_windows_debug_chain_blob (const char *scope, const char *desc)
   void *addr = 0;
   grub_size_t size = 0;
   ventoy_chain_head *chain;
+  ventoy_override_chunk *ovr;
+  ventoy_virt_chunk *virt;
+  grub_uint32_t i;
 
   if (!grub_ventoy_windows_parse_memdesc (desc, &addr, &size))
     return;
@@ -368,6 +371,50 @@ grub_ventoy_windows_debug_chain_blob (const char *scope, const char *desc)
                                  ((grub_uint64_t) chain->os_param.vtoy_disk_signature[1] << 8) |
                                  ((grub_uint64_t) chain->os_param.vtoy_disk_signature[2] << 16) |
                                  ((grub_uint64_t) chain->os_param.vtoy_disk_signature[3] << 24));
+  grub_ventoy_windows_debug_u64 (scope, "chain_override_chunk_offset",
+                                 chain->override_chunk_offset);
+  grub_ventoy_windows_debug_u64 (scope, "chain_virt_chunk_offset",
+                                 chain->virt_chunk_offset);
+
+  if (chain->override_chunk_offset &&
+      chain->override_chunk_num &&
+      chain->override_chunk_offset < size)
+    {
+      ovr = (ventoy_override_chunk *) ((char *) chain + chain->override_chunk_offset);
+      for (i = 0; i < chain->override_chunk_num && i < 8; i++)
+        {
+          grub_printf ("ventoydbg:%s override[%u] img_offset=%llu size=%u\n",
+                       scope ? scope : "(null)", (unsigned) i,
+                       (unsigned long long) ovr[i].img_offset,
+                       (unsigned) ovr[i].override_size);
+          grub_dprintf ("ventoydbg", "%s override[%u] img_offset=%llu size=%u\n",
+                        scope ? scope : "(null)", (unsigned) i,
+                        (unsigned long long) ovr[i].img_offset,
+                        (unsigned) ovr[i].override_size);
+        }
+    }
+
+  if (chain->virt_chunk_offset &&
+      chain->virt_chunk_num &&
+      chain->virt_chunk_offset < size)
+    {
+      virt = (ventoy_virt_chunk *) ((char *) chain + chain->virt_chunk_offset);
+      for (i = 0; i < chain->virt_chunk_num && i < 8; i++)
+        {
+          grub_printf ("ventoydbg:%s virt[%u] remap=[%u,%u) org=%u mem=[%u,%u) mem_off=%u\n",
+                       scope ? scope : "(null)", (unsigned) i,
+                       virt[i].remap_sector_start, virt[i].remap_sector_end,
+                       virt[i].org_sector_start,
+                       virt[i].mem_sector_start, virt[i].mem_sector_end,
+                       virt[i].mem_sector_offset);
+          grub_dprintf ("ventoydbg", "%s virt[%u] remap=[%u,%u) org=%u mem=[%u,%u) mem_off=%u\n",
+                        scope ? scope : "(null)", (unsigned) i,
+                        virt[i].remap_sector_start, virt[i].remap_sector_end,
+                        virt[i].org_sector_start,
+                        virt[i].mem_sector_start, virt[i].mem_sector_end,
+                        virt[i].mem_sector_offset);
+        }
+    }
 }
 
 static grub_err_t
@@ -1794,6 +1841,11 @@ grub_ventoy_windows_install_udf_override (const char *prefix,
   grub_uint64_t file_size;
   grub_uint64_t remap_bytes;
   grub_uint64_t new_size64;
+  struct wim_header *patched_head;
+  grub_uint64_t patched_lookup_off;
+  grub_uint64_t patched_lookup_len;
+  grub_uint64_t patched_boot_off;
+  grub_uint64_t patched_boot_len;
   grub_size_t old_size;
   grub_size_t patched_size;
   grub_size_t patched_align;
@@ -1925,6 +1977,40 @@ grub_ventoy_windows_install_udf_override (const char *prefix,
     grub_memcpy ((char *) virt + data_offset,
                  (char *) grub_ventoy_windows_last_patched_wim_buf + wim_align_size,
                  append_size);
+
+  patched_head = (struct wim_header *) grub_ventoy_windows_last_patched_wim_buf;
+  patched_lookup_off = patched_head->lookup.offset;
+  patched_lookup_len = patched_head->lookup.len;
+  patched_boot_off = patched_head->boot.offset;
+  patched_boot_len = patched_head->boot.len;
+  grub_ventoy_windows_debug_u64 ("vtwindows-udf", "file_offset",
+                                 file_offset);
+  grub_ventoy_windows_debug_u64 ("vtwindows-udf", "file_offset_mod_2048",
+                                 (file_offset % 2048));
+  grub_ventoy_windows_debug_u64 ("vtwindows-udf", "patched_lookup_off",
+                                 patched_lookup_off);
+  grub_ventoy_windows_debug_u64 ("vtwindows-udf", "patched_lookup_len",
+                                 patched_lookup_len);
+  grub_ventoy_windows_debug_u64 ("vtwindows-udf", "patched_boot_off",
+                                 patched_boot_off);
+  grub_ventoy_windows_debug_u64 ("vtwindows-udf", "patched_boot_len",
+                                 patched_boot_len);
+  grub_ventoy_windows_debug_u64 ("vtwindows-udf", "patched_lookup_end",
+                                 patched_lookup_off + patched_lookup_len);
+  grub_ventoy_windows_debug_u64 ("vtwindows-udf", "patched_boot_end",
+                                 patched_boot_off + patched_boot_len);
+  grub_ventoy_windows_debug_u64 ("vtwindows-udf", "virt_remap_start",
+                                 virt->remap_sector_start);
+  grub_ventoy_windows_debug_u64 ("vtwindows-udf", "virt_remap_end",
+                                 virt->remap_sector_end);
+  grub_ventoy_windows_debug_u64 ("vtwindows-udf", "virt_org_start",
+                                 virt->org_sector_start);
+  grub_ventoy_windows_debug_u64 ("vtwindows-udf", "virt_mem_start",
+                                 virt->mem_sector_start);
+  grub_ventoy_windows_debug_u64 ("vtwindows-udf", "virt_mem_end",
+                                 virt->mem_sector_end);
+  grub_ventoy_windows_debug_u64 ("vtwindows-udf", "virt_mem_offset",
+                                 virt->mem_sector_offset);
 
   grub_ventoy_windows_debug_u64 ("vtwindows-udf", "pd_size_offset",
                                  pd_size_offset);

@@ -108,9 +108,6 @@ grub_cmd_wimboot (grub_extcmd_context_t ctxt, int argc, char *argv[])
   if (argc < 1)
     return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("filename expected"));
 
-  grub_dprintf ("wimbootdbg", "wimboot: argc=%d wim=%s\n", argc,
-                argc > 0 && argv[0] ? argv[0] : "(none)");
-
   if (state[WIMBOOT_GUI].set)
     wimboot_cmd.gui = 1;
   if (state[WIMBOOT_RAWBCD].set)
@@ -125,20 +122,10 @@ grub_cmd_wimboot (grub_extcmd_context_t ctxt, int argc, char *argv[])
     mbstowcs (wimboot_cmd.inject, state[WIMBOOT_INJECT].arg, 256);
 
   set_wim_patch (&wimboot_cmd);
-  grub_dprintf ("wimbootdbg",
-                "wimboot: opts gui=%d rawbcd=%d rawwim=%d pause=%d index=%u inject=%ls\n",
-                wimboot_cmd.gui, wimboot_cmd.rawbcd, wimboot_cmd.rawwim,
-                wimboot_cmd.pause, wimboot_cmd.index, wimboot_cmd.inject);
 
   grub_wimboot_init (argc, argv);
-  grub_dprintf ("wimbootdbg", "wimboot: init done bcd=%p bootsdi=%p wim=%s\n",
-                wimboot_cmd.bcd, wimboot_cmd.bootsdi,
-                wimboot_cmd.wim ? wimboot_cmd.wim : "(null)");
 
   grub_wimboot_extract (&wimboot_cmd);
-  grub_dprintf ("wimbootdbg", "wimboot: extract done bcd=%p bootsdi=%p wim=%s\n",
-                wimboot_cmd.bcd, wimboot_cmd.bootsdi,
-                wimboot_cmd.wim ? wimboot_cmd.wim : "(null)");
   if (! wimboot_cmd.bcd)
   {
     struct bcd_patch_data data;
@@ -169,23 +156,16 @@ grub_cmd_wimboot (grub_extcmd_context_t ctxt, int argc, char *argv[])
       data.winload = state[WIMBOOT_WINLOAD].arg;
     if (state[WIMBOOT_SYSROOT].set)
       data.sysroot = state[WIMBOOT_SYSROOT].arg;
-	    grub_patch_bcd (&data);
-	    grub_file_t bcd = file_open ("(proc)/bcd", 0, 0, 0);
-	    grub_dprintf ("wimbootdbg", "wimboot: generated BCD file=%p size=%llu\n",
-                          bcd, bcd ? (unsigned long long) bcd->size : 0ULL);
-	    vfat_add_file ("bcd", bcd, bcd->size, vfat_read_wrapper);
+    grub_patch_bcd (&data);
+    grub_file_t bcd = file_open ("(proc)/bcd", 0, 0, 0);
+    vfat_add_file ("bcd", bcd, bcd->size, vfat_read_wrapper);
   }
   if (! wimboot_cmd.bootsdi)
   {
-	    grub_file_t bootsdi = file_open ("(proc)/boot.sdi", 0, 0, 0);
-	    grub_dprintf ("wimbootdbg", "wimboot: using proc boot.sdi file=%p size=%llu\n",
-                          bootsdi, bootsdi ? (unsigned long long) bootsdi->size : 0ULL);
-	    vfat_add_file ("boot.sdi", bootsdi, bootsdi->size, vfat_read_wrapper);
+    grub_file_t bootsdi = file_open ("(proc)/boot.sdi", 0, 0, 0);
+    vfat_add_file ("boot.sdi", bootsdi, bootsdi->size, vfat_read_wrapper);
   }
-  grub_dprintf ("wimbootdbg", "wimboot: install virtual FAT\n");
   grub_wimboot_install ();
-  grub_dprintf ("wimbootdbg", "wimboot: boot transfer bootmgfw=%p\n",
-                wimboot_cmd.bootmgfw);
   grub_wimboot_boot (&wimboot_cmd);
 
   grub_pause_fatal ("failed to boot.\n");
