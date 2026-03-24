@@ -1298,6 +1298,7 @@ module = {
 module = {
   name = ventoywindows;
   common = ventoy/ventoy_windows.c;
+  common = ventoy/ventoy_vhd.c;
   common = ventoy/ventoy_wimpatch.c;
   common = ventoy/ventoy_huffman.c;
   common = ventoy/ventoy_lzx.c;
