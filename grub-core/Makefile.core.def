@@ -1276,6 +1276,8 @@ module = {
 module = {
   name = ventoycore;
   common = ventoy/core.c;
+  common = ventoy/ventoy_json.c;
+  common = ventoy/ventoy_plugin.c;
 
   cflags = '-Wno-strict-aliasing -fshort-wchar';
   cppflags = '-I$(srcdir)/map/include';
