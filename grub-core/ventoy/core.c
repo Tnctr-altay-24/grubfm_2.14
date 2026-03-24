@@ -589,6 +589,32 @@ ventoy_img_chunk_list g_img_chunk_list =
 auto_memdisk *g_auto_memdisk_head = 0;
 
 char g_arch_mode_suffix[64] = {0};
+
+static void
+grub_ventoy_init_env_param (void)
+{
+  char buf[64];
+
+  if (!grub_env_get ("vtdebug_flag"))
+    grub_env_set ("vtdebug_flag", "");
+
+  if (!g_grub_param)
+    g_grub_param = grub_zalloc (sizeof (*g_grub_param));
+
+  if (!g_grub_param)
+    return;
+
+  g_grub_param->grub_env_get = (grub_env_get_pf) grub_env_get;
+  g_grub_param->grub_env_set = grub_env_set;
+  g_grub_param->grub_env_printf = (grub_env_printf_pf) grub_printf;
+
+  grub_snprintf (buf, sizeof (buf), "%p", g_grub_param);
+  grub_env_set ("env_param", buf);
+  grub_env_set ("ventoy_env_param", buf);
+  grub_env_export ("env_param");
+  grub_env_export ("ventoy_env_param");
+}
+
 void
 ventoy_debug (const char *fmt, ...)
 {
@@ -629,6 +655,7 @@ ventoy_strncmp (const char *pattern, const char *str, grub_size_t n)
 
 GRUB_MOD_INIT(ventoycore)
 {
+  grub_ventoy_init_env_param ();
   grub_ventoy_cmd_init_core ();
 }
 
@@ -637,5 +664,7 @@ GRUB_MOD_FINI(ventoycore)
   grub_free (grub_ventoy_last_chain_buf);
   grub_ventoy_last_chain_buf = 0;
   grub_ventoy_last_chain_size = 0;
+  grub_free (g_grub_param);
+  g_grub_param = 0;
   grub_ventoy_cmd_fini_core ();
 }
