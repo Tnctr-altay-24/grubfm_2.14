@@ -254,7 +254,7 @@ grub_ventoy_vhd_vhd_find_bcd (const char *path, int *bcdoffset, int *bcdlen)
   if (!path || !bcdoffset || !bcdlen || !grub_ventoy_vhdboot_isobuf)
     return 1;
 
-  cmd = grub_xasprintf ("loopback vhdiso mem:%p:size:%llu",
+  cmd = grub_xasprintf ("loopback -m vhdiso mem:%p:size:%llu",
                         grub_ventoy_vhdboot_isobuf,
                         (unsigned long long) grub_ventoy_vhdboot_isolen);
   if (!cmd)
@@ -713,6 +713,77 @@ grub_ventoy_raw_chain_trim_head (grub_file_t file, ventoy_chain_head *chain,
   return GRUB_ERR_NONE;
 }
 
+/*
+ * Some filesystem paths may return already-absolute disk sectors while
+ * core chunk finalization also adds partition start, which can push ranges
+ * beyond disk capacity. Only fix when overflow is detected.
+ */
+static void
+grub_ventoy_raw_chain_fixup_part_start (grub_file_t file, ventoy_chain_head *chain)
+{
+  ventoy_img_chunk *chunks;
+  grub_uint32_t chunk_num;
+  grub_uint64_t part_start;
+  grub_uint64_t total_sectors;
+  grub_uint32_t i;
+  int overflow = 0;
+
+  if (!file || !file->device || !file->device->disk || !chain)
+    return;
+
+  if (!file->device->disk->partition)
+    return;
+
+  part_start = grub_partition_get_start (file->device->disk->partition);
+  if (!part_start)
+    return;
+
+  total_sectors = file->device->disk->total_sectors;
+  if (!total_sectors)
+    return;
+
+  chunks = (ventoy_img_chunk *) ((char *) chain + chain->img_chunk_offset);
+  chunk_num = chain->img_chunk_num;
+  if (!chunks || !chunk_num)
+    return;
+
+  for (i = 0; i < chunk_num; i++)
+    {
+      if (chunks[i].disk_end_sector >= total_sectors)
+        {
+          overflow = 1;
+          break;
+        }
+    }
+
+  if (!overflow)
+    return;
+
+  for (i = 0; i < chunk_num; i++)
+    {
+      grub_uint64_t new_start;
+      grub_uint64_t new_end;
+
+      if (chunks[i].disk_start_sector < part_start
+          || chunks[i].disk_end_sector < part_start)
+        return;
+
+      new_start = chunks[i].disk_start_sector - part_start;
+      new_end = chunks[i].disk_end_sector - part_start;
+      if (new_end >= total_sectors || new_end < new_start)
+        return;
+    }
+
+  for (i = 0; i < chunk_num; i++)
+    {
+      chunks[i].disk_start_sector -= part_start;
+      chunks[i].disk_end_sector -= part_start;
+    }
+
+  debug ("raw chain chunk LBA overflow fixed by part_start=%llu\n",
+         (unsigned long long) part_start);
+}
+
 static grub_err_t
 grub_cmd_vt_get_vtoy_type (grub_extcmd_context_t ctxt __attribute__ ((unused)),
                            int argc, char **args)
@@ -780,6 +851,27 @@ grub_cmd_vt_get_vtoy_type (grub_extcmd_context_t ctxt __attribute__ ((unused)),
   return GRUB_ERR_NONE;
 }
 
+/*
+ * Compatibility shim for legacy grub scripts.
+ * Current raw-chain flow computes image chunks inside vt_raw_chain_data.
+ */
+static grub_err_t
+grub_cmd_vt_img_sector (grub_extcmd_context_t ctxt __attribute__ ((unused)),
+                        int argc, char **args)
+{
+  grub_file_t file;
+
+  if (argc != 1)
+    return grub_error (GRUB_ERR_BAD_ARGUMENT, "filename expected");
+
+  file = grub_file_open (args[0], GRUB_FILE_TYPE_GET_SIZE);
+  if (!file)
+    return grub_errno;
+
+  grub_file_close (file);
+  return GRUB_ERR_NONE;
+}
+
 static grub_err_t
 grub_cmd_vt_raw_chain_data (grub_extcmd_context_t ctxt __attribute__ ((unused)),
                             int argc, char **args)
@@ -822,6 +914,8 @@ grub_cmd_vt_raw_chain_data (grub_extcmd_context_t ctxt __attribute__ ((unused)),
       grub_file_close (file);
       return err;
     }
+
+  grub_ventoy_raw_chain_fixup_part_start (file, chain);
 
   grub_free (grub_ventoy_raw_chain_buf);
   grub_ventoy_raw_chain_buf = chain;

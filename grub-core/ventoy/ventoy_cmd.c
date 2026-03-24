@@ -351,6 +351,7 @@ grub_ventoy_cmd_fini_windows (void)
 static grub_extcmd_t cmd_vt_load_wimboot;
 static grub_extcmd_t cmd_vt_load_vhdboot;
 static grub_extcmd_t cmd_vt_patch_vhdboot;
+static grub_extcmd_t cmd_vt_img_sector;
 static grub_extcmd_t cmd_vt_get_vtoy_type;
 static grub_extcmd_t cmd_vt_raw_chain_data;
 
@@ -359,6 +360,7 @@ static const struct grub_ventoy_cmd_desc grub_ventoy_vhd_cmds[] =
   {"vt_load_wimboot", grub_cmd_vt_load_wimboot, 0, "", "", 0, &cmd_vt_load_wimboot},
   {"vt_load_vhdboot", grub_cmd_vt_load_vhdboot, 0, "", "", 0, &cmd_vt_load_vhdboot},
   {"vt_patch_vhdboot", grub_cmd_vt_patch_vhdboot, 0, "", "", 0, &cmd_vt_patch_vhdboot},
+  {"vt_img_sector", grub_cmd_vt_img_sector, 0, "", "", 0, &cmd_vt_img_sector},
   {"vt_get_vtoy_type", grub_cmd_vt_get_vtoy_type, 0, "", "", 0, &cmd_vt_get_vtoy_type},
   {"vt_raw_chain_data", grub_cmd_vt_raw_chain_data, 0, "", "", 0, &cmd_vt_raw_chain_data}
 };
