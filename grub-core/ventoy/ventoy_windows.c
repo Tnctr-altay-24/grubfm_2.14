@@ -2591,6 +2591,34 @@ grub_ventoy_windows_tree_any_path_exists (const char *root,
   return 0;
 }
 
+static int
+grub_ventoy_windows_wimboot_path_supported (const char *path)
+{
+  const char *seg;
+  const char *slash;
+  grub_size_t len;
+
+  if (!path || path[0] != '/')
+    return 0;
+
+  seg = path + 1;
+  slash = grub_strchr (seg, '/');
+  if (!slash)
+    return 1;
+
+  len = (grub_size_t) (slash - seg);
+  if (len == 4 && grub_strncasecmp (seg, "boot", len) == 0)
+    return 1;
+  if (len == 7 && grub_strncasecmp (seg, "sources", len) == 0)
+    return 1;
+  if (len == 3 && grub_strncasecmp (seg, "efi", len) == 0)
+    return 1;
+  if (len == 9 && grub_strncasecmp (seg, "microsoft", len) == 0)
+    return 1;
+
+  return 0;
+}
+
 static grub_err_t
 grub_cmd_vt_is_standard_winiso (grub_extcmd_context_t ctxt __attribute__ ((unused)),
                                 int argc, char **args)
@@ -2876,13 +2904,19 @@ grub_cmd_vtwimboot (grub_extcmd_context_t ctxt, int argc, char **args)
   char *sdi_name = 0;
   char *wim_name = 0;
   char *index_name = 0;
+  char *rawwim_name = 0;
+  char *patch0_name = 0;
   const char *efi = 0;
   const char *bcd = 0;
   const char *sdi = 0;
   const char *wim = 0;
   const char *index = 0;
+  const char *rawwim = 0;
+  const char *patch0 = 0;
   char *script = 0;
   char *index_opt = 0;
+  char *rawwim_opt = 0;
+  int use_external_bcd = 1;
 
   err = grub_ventoy_windows_prepare (ctxt, argc, args, &prefix, &file, &chain, &chain_size);
   if (err != GRUB_ERR_NONE)
@@ -2914,7 +2948,10 @@ grub_cmd_vtwimboot (grub_extcmd_context_t ctxt, int argc, char **args)
   sdi_name = grub_xasprintf ("%s_sdi_full", prefix);
   wim_name = grub_xasprintf ("%s_patched_wim", prefix);
   index_name = grub_xasprintf ("%s_wim_boot_index", prefix);
-  if (!efi_name || !bcd_name || !sdi_name || !wim_name || !index_name)
+  rawwim_name = grub_xasprintf ("%s_rawwim", prefix);
+  patch0_name = grub_xasprintf ("%s_patch_0", prefix);
+  if (!efi_name || !bcd_name || !sdi_name || !wim_name || !index_name ||
+      !rawwim_name || !patch0_name)
     {
       err = grub_errno;
       goto fail;
@@ -2925,6 +2962,8 @@ grub_cmd_vtwimboot (grub_extcmd_context_t ctxt, int argc, char **args)
   sdi = grub_env_get (sdi_name);
   wim = grub_env_get (wim_name);
   index = grub_env_get (index_name);
+  rawwim = grub_env_get (rawwim_name);
+  patch0 = grub_env_get (patch0_name);
   if (!efi || !*efi || !bcd || !*bcd || !sdi || !*sdi || !wim || !*wim)
     {
       err = grub_error (GRUB_ERR_BAD_ARGUMENT,
@@ -2937,23 +2976,47 @@ grub_cmd_vtwimboot (grub_extcmd_context_t ctxt, int argc, char **args)
   grub_ventoy_windows_debug_string ("vtwimboot", "sdi", sdi);
   grub_ventoy_windows_debug_string ("vtwimboot", "wim", wim);
   grub_ventoy_windows_debug_string ("vtwimboot", "index", index ? index : "(null)");
+  grub_ventoy_windows_debug_string ("vtwimboot", "patch0", patch0 ? patch0 : "(null)");
 
   if (index && *index)
     index_opt = grub_xasprintf (" --index=%s", index);
   else
     index_opt = grub_strdup ("");
-  if (!index_opt)
+  if (rawwim && rawwim[0] && rawwim[0] != '0')
+    rawwim_opt = grub_strdup (" --rawwim");
+  else
+    rawwim_opt = grub_strdup ("");
+  if (!index_opt || !rawwim_opt)
     {
       err = grub_errno;
       goto fail;
     }
 
-  script = grub_xasprintf (
-      "insmod wimboot\n"
-      "set debug=vtchunkdbg,ventoydbg,wimbootdbg,bcddbg\n"
-      "wimboot --rawwim%s @:bootmgfw.efi:%s @:BCD:%s @:boot.sdi:%s @:boot.wim:%s\n",
-      index_opt,
-      efi, bcd, sdi, wim);
+  if (patch0 && *patch0 && !grub_ventoy_windows_wimboot_path_supported (patch0))
+    {
+      use_external_bcd = 0;
+      grub_ventoy_windows_debug_string ("vtwimboot", "bcd_mode",
+                                        "auto-bcd (unsupported image path)");
+    }
+  else
+    {
+      grub_ventoy_windows_debug_string ("vtwimboot", "bcd_mode", "external-bcd");
+    }
+
+  if (use_external_bcd)
+    script = grub_xasprintf (
+        "insmod wimboot\n"
+        "set debug=vtchunkdbg,ventoydbg,wimbootdbg,bcddbg\n"
+        "wimboot%s%s @:bootmgfw.efi:%s @:BCD:%s @:boot.sdi:%s @:boot.wim:%s\n",
+        rawwim_opt, index_opt,
+        efi, bcd, sdi, wim);
+  else
+    script = grub_xasprintf (
+        "insmod wimboot\n"
+        "set debug=vtchunkdbg,ventoydbg,wimbootdbg,bcddbg\n"
+        "wimboot%s%s @:bootmgfw.efi:%s @:boot.sdi:%s @:boot.wim:%s\n",
+        rawwim_opt, index_opt,
+        efi, sdi, wim);
   if (!script)
     {
       err = grub_errno;
@@ -2966,7 +3029,10 @@ grub_cmd_vtwimboot (grub_extcmd_context_t ctxt, int argc, char **args)
 
 fail:
   grub_free (script);
+  grub_free (rawwim_opt);
   grub_free (index_opt);
+  grub_free (patch0_name);
+  grub_free (rawwim_name);
   grub_free (index_name);
   grub_free (wim_name);
   grub_free (sdi_name);
