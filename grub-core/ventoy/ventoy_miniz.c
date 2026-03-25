@@ -84,6 +84,7 @@
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wundef"
+#pragma GCC diagnostic ignored "-Wmisleading-indentation"
 
 #define size_t   grub_size_t
 #define uint8_t  grub_uint8_t

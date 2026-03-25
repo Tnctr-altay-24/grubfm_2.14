@@ -27,6 +27,9 @@
 #include "ventoy_wimboot.h"
 #include "ventoy_huffman.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+
 /**
  * Transcribe binary value (for debugging)
  *
@@ -34,7 +37,8 @@
  * @v bits		Length of value (in bits)
  * @ret string		Transcribed value
  */
-static const char * ventoy_huffman_bin ( unsigned long value, unsigned int bits ) {
+static const char * __attribute__ (( unused ))
+ventoy_huffman_bin ( unsigned long value, unsigned int bits ) {
 	static char buf[ ( 8 * sizeof ( value ) ) + 1 /* NUL */ ];
 	char *out = buf;
 
@@ -185,6 +189,8 @@ int ventoy_huffman_alphabet ( struct huffman_alphabet *alphabet,
 
 	return 0;
 }
+
+#pragma GCC diagnostic pop
 
 /**
  * Get Huffman symbol set

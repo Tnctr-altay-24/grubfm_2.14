@@ -33,6 +33,7 @@
 #include <grub/ventoy.h>
 
 #include "ventoy_vfat.h"
+#include "ventoy_compat.h"
 
 typedef grub_packed_guid_t ventoy_guid;
 
@@ -690,6 +691,7 @@ typedef struct replace_fs_dir
 {
     grub_device_t dev;
     grub_fs_t fs;
+    char device[64];
     char fullpath[512];
     char initrd[512];
     int curpos;

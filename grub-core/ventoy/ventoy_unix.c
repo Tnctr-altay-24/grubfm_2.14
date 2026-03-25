@@ -1,1751 +1,1244 @@
-#include <stdarg.h>
-
-#include <grub/device.h>
-#include <grub/disk.h>
-#include <grub/elf.h>
-#include <grub/elfload.h>
-#include <grub/env.h>
-#include <grub/err.h>
-#include <grub/file.h>
-#include <grub/fs.h>
-#include <grub/lib/crc.h>
+/******************************************************************************
+ * ventoy_unix.c 
+ *
+ * Copyright (c) 2020, longpanda <admin@ventoy.net>
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation; either version 3 of the
+ * License, or (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+#include <grub/types.h>
 #include <grub/misc.h>
 #include <grub/mm.h>
+#include <grub/err.h>
+#include <grub/dl.h>
+#include <grub/disk.h>
+#include <grub/device.h>
+#include <grub/term.h>
 #include <grub/partition.h>
+#include <grub/file.h>
+#include <grub/normal.h>
+#include <grub/extcmd.h>
+#include <grub/datetime.h>
+#include <grub/i18n.h>
+#include <grub/net.h>
+#include <grub/time.h>
+#include <grub/elf.h>
+#include <grub/elfload.h>
 #include <grub/ventoy.h>
+#include "ventoy_def.h"
 
-#include "ventoy_miniz.h"
+GRUB_MOD_LICENSE ("GPLv3+");
 
-struct grub_ventoy_unix_iso9660_override
+char g_ko_mod_path[256];
+int g_conf_new_len = 0;
+char *g_conf_new_data = NULL;
+
+int g_mod_new_len = 0;
+char *g_mod_new_data = NULL;
+
+int g_mod_search_magic = 0;
+int g_unix_vlnk_boot = 0;
+
+int g_ko_fillmap_len = 0;
+char *g_ko_fillmap_data = NULL;
+
+grub_uint64_t g_mod_override_offset = 0;
+grub_uint64_t g_conf_override_offset = 0;
+
+static int ventoy_get_file_override(const char *filename, grub_uint64_t *offset)
 {
-  grub_uint32_t first_sector;
-  grub_uint32_t first_sector_be;
-  grub_uint32_t size;
-  grub_uint32_t size_be;
-} GRUB_PACKED;
+    grub_file_t file;
 
-#define GRUB_VENTOY_UNIX_SEG_MAGIC0 0x11223344U
-#define GRUB_VENTOY_UNIX_SEG_MAGIC1 0x55667788U
-#define GRUB_VENTOY_UNIX_SEG_MAGIC2 0x99aabbccU
-#define GRUB_VENTOY_UNIX_SEG_MAGIC3 0xddeeff00U
-#define GRUB_VENTOY_UNIX_MAX_SEGNUM 40960U
-#define GRUB_VTOY_OFFSET_OF(type, member) ((grub_size_t) &((type *) 0)->member)
+    *offset = 0;
 
-struct grub_ventoy_unix_seg
-{
-  grub_uint64_t seg_start_bytes;
-  grub_uint64_t seg_end_bytes;
-} GRUB_PACKED;
-
-struct grub_ventoy_unix_map
-{
-  grub_uint32_t magic1[4];
-  grub_uint32_t magic2[4];
-  grub_uint64_t segnum;
-  grub_uint64_t disksize;
-  grub_uint8_t diskuuid[16];
-  struct grub_ventoy_unix_seg seglist[GRUB_VENTOY_UNIX_MAX_SEGNUM];
-  grub_uint32_t magic3[4];
-} GRUB_PACKED;
-
-struct grub_ventoy_vlnk_part
-{
-  grub_uint32_t diskgig;
-  grub_uint64_t partoffset;
-  char disk[64];
-  char device[64];
-  grub_device_t dev;
-  grub_fs_t fs;
-  int probe;
-  struct grub_ventoy_vlnk_part *next;
-};
-
-static struct grub_ventoy_vlnk_part *grub_ventoy_vlnk_part_list;
-static int grub_ventoy_unix_vlnk_boot;
-
-static char *grub_ventoy_unix_conf_new_data;
-static grub_size_t grub_ventoy_unix_conf_new_len;
-static grub_uint64_t grub_ventoy_unix_conf_override_offset;
-
-static char *grub_ventoy_unix_mod_new_data;
-static grub_size_t grub_ventoy_unix_mod_new_len;
-static grub_uint64_t grub_ventoy_unix_mod_override_offset;
-static grub_size_t grub_ventoy_unix_mod_search_magic;
-static char grub_ventoy_unix_ko_mod_path[256];
-static char *grub_ventoy_unix_ko_fillmap_data;
-static grub_size_t grub_ventoy_unix_ko_fillmap_len;
-static int grub_ventoy_unix_ko_fillmap_enable;
-static int grub_ventoy_unix_fill_image_desc_pending;
-
-static void *grub_ventoy_unix_last_chain_buf;
-static grub_size_t grub_ventoy_unix_last_chain_size;
-
-static char grub_ventoy_fake_vlnk_src[512];
-static char grub_ventoy_fake_vlnk_dst[512];
-static grub_uint64_t grub_ventoy_fake_vlnk_size;
-
-static const grub_packed_guid_t grub_ventoy_vlnk_guid = VENTOY_GUID;
-static const grub_uint8_t grub_ventoy_unix_desc_flag[32] =
-  {
-    0xFF, 0xEE, 0xDD, 0xCC, 0xBB, 0xAA, 0x99, 0x88,
-    0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00,
-    0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
-    0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF
-  };
-
-static grub_size_t
-grub_ventoy_align_2k (grub_size_t value)
-{
-  return ((value + 2047) / 2048) * 2048;
-}
-
-static int
-grub_ventoy_env_is_one_local (const char *name)
-{
-  const char *val = grub_env_get (name);
-  return (val && val[0] == '1' && val[1] == '\0');
-}
-
-static void
-grub_ventoy_refresh_osparam_checksum_local (ventoy_os_param *param)
-{
-  grub_uint32_t i;
-  grub_uint8_t chksum = 0;
-
-  if (!param)
-    return;
-
-  param->chksum = 0;
-  for (i = 0; i < sizeof (*param); i++)
-    chksum = (grub_uint8_t) (chksum + *(((grub_uint8_t *) param) + i));
-  param->chksum = (grub_uint8_t) (0x100 - chksum);
-}
-
-static void
-grub_ventoy_unix_memfile_env_set (const char *prefix, const void *buf,
-                                  grub_uint64_t len)
-{
-  char name[64];
-  char value[64];
-
-  if (!prefix || !*prefix)
-    return;
-
-  grub_snprintf (name, sizeof (name), "%s_addr", prefix);
-  if (!buf || len == 0)
+    file = ventoy_grub_file_open(VENTOY_FILE_TYPE, "(loop)%s", filename);
+    if (!file)
     {
-      grub_env_unset (name);
-      grub_snprintf (name, sizeof (name), "%s_size", prefix);
-      grub_env_unset (name);
-      return;
+        return 1;
     }
 
-  grub_snprintf (value, sizeof (value), "0x%llx",
-                 (unsigned long long) (grub_addr_t) buf);
-  grub_env_set (name, value);
-  grub_env_export (name);
-
-  grub_snprintf (name, sizeof (name), "%s_size", prefix);
-  grub_snprintf (value, sizeof (value), "%llu", (unsigned long long) len);
-  grub_env_set (name, value);
-  grub_env_export (name);
-}
-
-static int
-grub_ventoy_string_ends_with_nocase (const char *str, const char *suffix)
-{
-  grub_size_t slen;
-  grub_size_t tlen;
-
-  if (!str || !suffix)
+    *offset = grub_iso9660_get_last_file_dirent_pos(file) + 2;
+    
+    grub_file_close(file);
+    
     return 0;
-
-  slen = grub_strlen (str);
-  tlen = grub_strlen (suffix);
-  if (slen < tlen)
-    return 0;
-
-  return (grub_strcasecmp (str + slen - tlen, suffix) == 0);
 }
 
-static int
-grub_ventoy_is_vlnk_name (const char *name)
+static grub_uint32_t ventoy_unix_get_override_chunk_count(void)
 {
-  if (!name)
-    return 0;
+    grub_uint32_t count = 0;
 
-  if (grub_ventoy_string_ends_with_nocase (name, ".vlnk"))
-    return 1;
-
-  if (grub_ventoy_string_ends_with_nocase (name, ".vlnk.dat"))
-    return 1;
-
-  return 0;
-}
-
-static void
-grub_ventoy_unix_free_vlnk_parts (void)
-{
-  struct grub_ventoy_vlnk_part *cur;
-  struct grub_ventoy_vlnk_part *next;
-
-  for (cur = grub_ventoy_vlnk_part_list; cur; cur = next)
+    if (g_conf_new_len > 0)
     {
-      next = cur->next;
-      if (cur->dev)
-        grub_device_close (cur->dev);
-      grub_free (cur);
+        count++;
     }
-
-  grub_ventoy_vlnk_part_list = 0;
-}
-
-static void
-grub_ventoy_unix_reset_state (void)
-{
-  grub_ventoy_unix_vlnk_boot = 0;
-  grub_ventoy_unix_conf_new_len = 0;
-  grub_ventoy_unix_conf_override_offset = 0;
-  grub_ventoy_unix_mod_new_len = 0;
-  grub_ventoy_unix_mod_override_offset = 0;
-  grub_ventoy_unix_mod_search_magic = 0;
-  grub_ventoy_unix_ko_fillmap_len = 0;
-  grub_ventoy_unix_ko_fillmap_enable = 0;
-  grub_ventoy_unix_fill_image_desc_pending = 0;
-  grub_ventoy_unix_ko_mod_path[0] = '\0';
-
-  grub_free (grub_ventoy_unix_conf_new_data);
-  grub_ventoy_unix_conf_new_data = 0;
-  grub_free (grub_ventoy_unix_mod_new_data);
-  grub_ventoy_unix_mod_new_data = 0;
-  grub_free (grub_ventoy_unix_ko_fillmap_data);
-  grub_ventoy_unix_ko_fillmap_data = 0;
-}
-
-static void
-grub_ventoy_unix_reset_fake_vlnk (void)
-{
-  grub_ventoy_fake_vlnk_src[0] = '\0';
-  grub_ventoy_fake_vlnk_dst[0] = '\0';
-  grub_ventoy_fake_vlnk_size = 0;
-}
-
-static int
-grub_ventoy_vlnk_iterate_partition (struct grub_disk *disk,
-                                    const grub_partition_t partition,
-                                    void *data)
-{
-  struct grub_ventoy_vlnk_part *node;
-  grub_uint32_t *sig = data;
-  char *part_name = 0;
-
-  if (!disk || !partition || !sig)
-    return 0;
-
-  node = grub_zalloc (sizeof (*node));
-  if (!node)
-    return 0;
-
-  node->diskgig = *sig;
-  node->partoffset = ((grub_uint64_t) grub_partition_get_start (partition))
-                     << GRUB_DISK_SECTOR_BITS;
-  grub_snprintf (node->disk, sizeof (node->disk), "%s", disk->name);
-
-  part_name = grub_partition_get_name (partition);
-  if (part_name)
+    
+    if (g_mod_new_len > 0)
     {
-      grub_snprintf (node->device, sizeof (node->device), "%s,%s",
-                     disk->name, part_name);
-      grub_free (part_name);
+        count++;
     }
-  else
+    
+    if (g_ko_fillmap_len > 0)
     {
-      grub_snprintf (node->device, sizeof (node->device), "%s,%d",
-                     disk->name, partition->number + 1);
-    }
-
-  node->next = grub_ventoy_vlnk_part_list;
-  grub_ventoy_vlnk_part_list = node;
-  return 0;
-}
-
-static int
-grub_ventoy_vlnk_iterate_disk (const char *name, void *data __attribute__ ((unused)))
-{
-  grub_disk_t disk;
-  grub_uint32_t sig = 0;
-
-  if (!name || !*name)
-    return 0;
-
-  disk = grub_disk_open (name);
-  if (!disk)
-    {
-      grub_errno = GRUB_ERR_NONE;
-      return 0;
-    }
-
-  if (grub_disk_read (disk, 0, 0x1b8, 4, &sig) == GRUB_ERR_NONE)
-    (void) grub_partition_iterate (disk, grub_ventoy_vlnk_iterate_partition, &sig);
-  grub_errno = GRUB_ERR_NONE;
-  grub_disk_close (disk);
-
-  return 0;
-}
-
-static int
-grub_ventoy_vlnk_probe_fs (struct grub_ventoy_vlnk_part *cur)
-{
-  if (!cur)
-    return 1;
-
-  if (!cur->dev)
-    cur->dev = grub_device_open (cur->device);
-
-  if (cur->dev)
-    cur->fs = grub_fs_probe (cur->dev);
-
-  return 0;
-}
-
-static int
-grub_ventoy_vlnk_validate_and_resolve (const ventoy_vlnk *src, int print,
-                                       char *dst, grub_size_t size)
-{
-  int diskfind = 0;
-  int partfind = 0;
-  int filefind = 0;
-  grub_uint32_t readcrc;
-  grub_uint32_t calccrc;
-  ventoy_vlnk vlnk;
-  struct grub_ventoy_vlnk_part *cur;
-  const char *disk_name = 0;
-  const char *device_name = 0;
-  const char *fs_name = 0;
-
-  if (!src || !dst || size == 0)
-    return 1;
-
-  grub_memcpy (&vlnk, src, sizeof (vlnk));
-
-  if (grub_memcmp (&vlnk.guid, &grub_ventoy_vlnk_guid, sizeof (vlnk.guid)) != 0)
-    {
-      if (print)
-        grub_printf ("VLNK invalid guid\n");
-      return 1;
-    }
-
-  readcrc = vlnk.crc32;
-  vlnk.crc32 = 0;
-  calccrc = grub_getcrc32c (0, &vlnk, sizeof (vlnk));
-  if (readcrc != calccrc)
-    {
-      if (print)
-        grub_printf ("VLNK invalid crc 0x%08x 0x%08x\n", calccrc, readcrc);
-      return 1;
-    }
-
-  if (!grub_ventoy_vlnk_part_list)
-    (void) grub_disk_dev_iterate (grub_ventoy_vlnk_iterate_disk, 0);
-
-  for (cur = grub_ventoy_vlnk_part_list; cur && !filefind; cur = cur->next)
-    {
-      if (cur->diskgig != vlnk.disk_signature)
-        continue;
-
-      diskfind = 1;
-      disk_name = cur->disk;
-
-      if (cur->partoffset != vlnk.part_offset)
-        continue;
-
-      partfind = 1;
-      device_name = cur->device;
-
-      if (cur->probe == 0)
+        count += (g_ko_fillmap_len / 512);
+        if ((g_ko_fillmap_len % 512) > 0)
         {
-          cur->probe = 1;
-          grub_ventoy_vlnk_probe_fs (cur);
-        }
-
-      if (cur->fs)
-        {
-          struct grub_file file;
-
-          grub_memset (&file, 0, sizeof (file));
-          file.device = cur->dev;
-          file.fs = cur->fs;
-          if (cur->fs->fs_open (&file, vlnk.filepath) == GRUB_ERR_NONE)
-            {
-              filefind = 1;
-              fs_name = cur->fs->name;
-              cur->fs->fs_close (&file);
-              grub_snprintf (dst, size, "(%s)%s", cur->device, vlnk.filepath);
-            }
-          else
-            {
-              grub_errno = GRUB_ERR_NONE;
-            }
+            count++;
         }
     }
 
-  if (print)
-    {
-      grub_printf ("\n==== VLNK Information ====\n"
-                   "Disk Signature: %08x\n"
-                   "Partition Offset: %llu\n"
-                   "File Path: <%s>\n\n",
-                   vlnk.disk_signature,
-                   (unsigned long long) vlnk.part_offset,
-                   vlnk.filepath);
-
-      if (diskfind)
-        grub_printf ("Disk Find: [ YES ] [ %s ]\n", disk_name ? disk_name : "N/A");
-      else
-        grub_printf ("Disk Find: [ NO ]\n");
-
-      if (partfind)
-        grub_printf ("Part Find: [ YES ] [ %s ] [ %s ]\n",
-                     device_name ? device_name : "N/A",
-                     fs_name ? fs_name : "N/A");
-      else
-        grub_printf ("Part Find: [ NO ]\n");
-
-      grub_printf ("File Find: [ %s ]\n", filefind ? "YES" : "NO");
-      if (filefind)
-        grub_printf ("VLNK File: <%s>\n", dst);
-      grub_printf ("\n");
-    }
-
-  return filefind ? 0 : 1;
+    return count;
 }
 
-static int
-grub_ventoy_vlnk_load_and_resolve (const char *path, int print,
-                                   char *dst, grub_size_t size)
+static grub_uint32_t ventoy_unix_get_virt_chunk_count(void)
 {
-  grub_file_t file;
-  ventoy_vlnk vlnk;
-  grub_ssize_t rd;
+    grub_uint32_t count = 0;
 
-  if (!path || !*path || !dst || size == 0)
-    return 1;
-
-  file = grub_file_open (path, GRUB_FILE_TYPE_LOOPBACK);
-  if (!file)
+    if (g_conf_new_len > 0)
     {
-      if (print)
-        grub_printf ("Failed to open %s\n", path);
-      return 1;
+        count++;
+    }
+    
+    if (g_mod_new_len > 0)
+    {
+        count++;
     }
 
-  if (grub_file_size (file) < (grub_off_t) sizeof (vlnk))
+    return count;
+}
+static grub_uint32_t ventoy_unix_get_virt_chunk_size(void)
+{
+    grub_uint32_t size;
+
+    size = sizeof(ventoy_virt_chunk) * ventoy_unix_get_virt_chunk_count();
+
+    if (g_conf_new_len > 0)
     {
-      if (print)
-        grub_printf ("Invalid vlnk file (size=%llu).\n",
-                     (unsigned long long) grub_file_size (file));
-      grub_file_close (file);
-      return 1;
+        size += ventoy_align_2k(g_conf_new_len);
+    }
+    
+    if (g_mod_new_len > 0)
+    {
+        size += ventoy_align_2k(g_mod_new_len);
     }
 
-  grub_memset (&vlnk, 0, sizeof (vlnk));
-  rd = grub_file_read (file, &vlnk, sizeof (vlnk));
-  grub_file_close (file);
-  if (rd < (grub_ssize_t) sizeof (vlnk))
+    return size;
+}
+
+static void ventoy_unix_fill_map_data(ventoy_chain_head *chain, struct g_ventoy_map *map)
+{
+    grub_uint32_t i;
+    ventoy_img_chunk *chunk = NULL;
+
+    debug("Fill unix map data: <%llu> <%u> %p\n", 
+        (unsigned long long)chain->os_param.vtoy_disk_size, g_img_chunk_list.cur_chunk, map);
+    
+    map->magic1[0] = map->magic2[0] = VENTOY_UNIX_SEG_MAGIC0;
+    map->magic1[1] = map->magic2[1] = VENTOY_UNIX_SEG_MAGIC1;
+    map->magic1[2] = map->magic2[2] = VENTOY_UNIX_SEG_MAGIC2;
+    map->magic1[3] = map->magic2[3] = VENTOY_UNIX_SEG_MAGIC3;
+
+    map->disksize = chain->os_param.vtoy_disk_size;
+    grub_memcpy(map->diskuuid, chain->os_param.vtoy_disk_guid, 16);
+
+    map->segnum = g_img_chunk_list.cur_chunk;
+    if (g_img_chunk_list.cur_chunk > VENTOY_UNIX_MAX_SEGNUM)
     {
-      if (print)
-        grub_printf ("Failed to read vlnk payload: %s\n", path);
-      grub_errno = GRUB_ERR_NONE;
-      return 1;
+        debug("####[FAIL] Too many segments for the ISO file %u\n", g_img_chunk_list.cur_chunk);
+        map->segnum = VENTOY_UNIX_MAX_SEGNUM;
     }
-
-  return grub_ventoy_vlnk_validate_and_resolve (&vlnk, print, dst, size);
-}
-
-static int
-grub_ventoy_unix_get_file_override (const char *filename,
-                                    grub_uint64_t *offset)
-{
-  grub_file_t file;
-  char *full;
-
-  if (!filename || !offset)
-    return 1;
-
-  *offset = 0;
-  full = grub_xasprintf ("(loop)%s", filename);
-  if (!full)
-    return 1;
-
-  file = grub_file_open (full, GRUB_FILE_TYPE_LOOPBACK);
-  grub_free (full);
-  if (!file)
+    
+    for (i = 0; i < (grub_uint32_t)(map->segnum); i++)
     {
-      grub_errno = GRUB_ERR_NONE;
-      return 1;
-    }
-
-  *offset = grub_iso9660_get_last_file_dirent_pos (file) + 2;
-  grub_file_close (file);
-  return 0;
-}
-
-static grub_err_t
-grub_ventoy_unix_replace_blob (const char *path, char **buf_out,
-                               grub_size_t *len_out)
-{
-  grub_file_t file;
-  char *buf;
-  grub_size_t size;
-
-  if (!path || !buf_out || !len_out)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT,
-                       "invalid unix replace blob arguments");
-
-  file = grub_file_open (path, GRUB_FILE_TYPE_LOOPBACK);
-  if (!file)
-    return grub_errno ? grub_errno :
-                       grub_error (GRUB_ERR_FILE_NOT_FOUND,
-                                   "failed to open %s", path);
-
-  size = grub_file_size (file);
-  buf = grub_malloc (size + 1);
-  if (!buf)
-    {
-      grub_file_close (file);
-      return grub_errno;
-    }
-
-  if (size > 0 && grub_file_read (file, buf, size) < 0)
-    {
-      grub_file_close (file);
-      grub_free (buf);
-      return grub_errno ? grub_errno :
-                         grub_error (GRUB_ERR_READ_ERROR,
-                                     "failed to read %s", path);
-    }
-
-  grub_file_close (file);
-  buf[size] = '\0';
-
-  grub_free (*buf_out);
-  *buf_out = buf;
-  *len_out = size;
-  return GRUB_ERR_NONE;
-}
-
-static grub_size_t
-grub_ventoy_append_text (char *buf, grub_size_t cap, grub_size_t pos,
-                         const char *fmt, ...)
-{
-  va_list ap;
-  int rc;
-
-  if (!buf || !fmt || pos >= cap)
-    return pos;
-
-  va_start (ap, fmt);
-  rc = grub_vsnprintf (buf + pos, cap - pos, fmt, ap);
-  va_end (ap);
-  if (rc <= 0)
-    return pos;
-
-  if ((grub_size_t) rc >= cap - pos)
-    return cap - 1;
-
-  return pos + (grub_size_t) rc;
-}
-
-static grub_size_t
-grub_ventoy_unix_append_freebsd_conf (char *buf, grub_size_t cap,
-                                      const char *alias)
-{
-  grub_size_t pos = 0;
-  const char *remount;
-
-  pos = grub_ventoy_append_text (buf, cap, pos, "ventoy_load=\"YES\"\n");
-  if (grub_ventoy_unix_ko_mod_path[0])
-    pos = grub_ventoy_append_text (buf, cap, pos, "ventoy_name=\"%s\"\n",
-                                   grub_ventoy_unix_ko_mod_path);
-
-  if (alias && *alias)
-    pos = grub_ventoy_append_text (buf, cap, pos,
-                                   "hint.ventoy.0.alias=\"%s\"\n", alias);
-
-  if (grub_ventoy_unix_vlnk_boot)
-    pos = grub_ventoy_append_text (buf, cap, pos,
-                                   "hint.ventoy.0.vlnk=%d\n", 1);
-
-  remount = grub_env_get ("VTOY_UNIX_REMOUNT");
-  if (remount && remount[0] == '1' && remount[1] == '\0')
-    pos = grub_ventoy_append_text (buf, cap, pos,
-                                   "hint.ventoy.0.remount=%d\n", 1);
-
-  return pos;
-}
-
-static grub_size_t
-grub_ventoy_unix_append_dragonfly_conf (char *buf, grub_size_t cap)
-{
-  grub_size_t pos = 0;
-
-  pos = grub_ventoy_append_text (buf, cap, pos, "tmpfs_load=\"YES\"\n");
-  pos = grub_ventoy_append_text (buf, cap, pos, "dm_target_linear_load=\"YES\"\n");
-  pos = grub_ventoy_append_text (buf, cap, pos, "initrd.img_load=\"YES\"\n");
-  pos = grub_ventoy_append_text (buf, cap, pos, "initrd.img_type=\"md_image\"\n");
-  pos = grub_ventoy_append_text (buf, cap, pos, "vfs.root.mountfrom=\"ufs:md0s0\"\n");
-
-  return pos;
-}
-
-static grub_size_t
-grub_ventoy_unix_search_map_magic (const char *data, grub_size_t len)
-{
-  grub_size_t i;
-  const grub_uint32_t *magic;
-
-  if (!data || len < 16)
-    return 0;
-
-  for (i = 0; i + 16 <= len; i += 4096)
-    {
-      magic = (const grub_uint32_t *) (data + i);
-      if (magic[0] == GRUB_VENTOY_UNIX_SEG_MAGIC0
-          && magic[1] == GRUB_VENTOY_UNIX_SEG_MAGIC1
-          && magic[2] == GRUB_VENTOY_UNIX_SEG_MAGIC2
-          && magic[3] == GRUB_VENTOY_UNIX_SEG_MAGIC3)
-        return i;
-    }
-
-  return 0;
-}
-
-static void
-grub_ventoy_unix_fill_map_data (const ventoy_chain_head *chain,
-                                const ventoy_img_chunk_list *chunk_list,
-                                struct grub_ventoy_unix_map *map,
-                                grub_size_t map_len)
-{
-  grub_uint32_t i;
-  grub_uint32_t segnum;
-
-  if (!chain || !chunk_list || !map)
-    return;
-
-  if (map_len > 0)
-    grub_memset (map, 0, map_len);
-  map->magic1[0] = map->magic2[0] = GRUB_VENTOY_UNIX_SEG_MAGIC0;
-  map->magic1[1] = map->magic2[1] = GRUB_VENTOY_UNIX_SEG_MAGIC1;
-  map->magic1[2] = map->magic2[2] = GRUB_VENTOY_UNIX_SEG_MAGIC2;
-  map->magic1[3] = map->magic2[3] = GRUB_VENTOY_UNIX_SEG_MAGIC3;
-  map->disksize = chain->os_param.vtoy_disk_size;
-  grub_memcpy (map->diskuuid, chain->os_param.vtoy_disk_guid, 16);
-
-  segnum = chunk_list->cur_chunk;
-  if (segnum > GRUB_VENTOY_UNIX_MAX_SEGNUM)
-    segnum = GRUB_VENTOY_UNIX_MAX_SEGNUM;
-  map->segnum = segnum;
-
-  for (i = 0; i < segnum; i++)
-    {
-      const ventoy_img_chunk *chunk = chunk_list->chunk + i;
-      map->seglist[i].seg_start_bytes = chunk->disk_start_sector * 512ULL;
-      map->seglist[i].seg_end_bytes = (chunk->disk_end_sector + 1) * 512ULL;
+        chunk = g_img_chunk_list.chunk + i;
+        map->seglist[i].seg_start_bytes = chunk->disk_start_sector * 512ULL;
+        map->seglist[i].seg_end_bytes = (chunk->disk_end_sector + 1) * 512ULL;        
     }
 }
 
-static void
-grub_ventoy_unix_fill_image_desc_blob (const ventoy_chain_head *chain,
-                                       const ventoy_img_chunk_list *chunk_list)
+static void ventoy_unix_fill_override_data(    grub_uint64_t isosize, ventoy_chain_head *chain)
 {
-  grub_size_t i;
-  grub_size_t chunk_memsize;
-  ventoy_image_desc *desc;
-  grub_uint8_t *byte;
+    int i;
+    int left;
+    char *data = NULL;
+    grub_uint64_t offset;
+    grub_uint64_t sector;
+    ventoy_override_chunk *cur;
+    ventoy_iso9660_override *dirent;
+    
+    sector = (isosize + 2047) / 2048;
 
-  if (!chain || !chunk_list || !grub_ventoy_unix_mod_new_data
-      || grub_ventoy_unix_mod_new_len < sizeof (grub_ventoy_unix_desc_flag))
-    return;
+    cur = (ventoy_override_chunk *)((char *)chain + chain->override_chunk_offset);
 
-  byte = (grub_uint8_t *) grub_ventoy_unix_mod_new_data;
-  for (i = 0; i + sizeof (grub_ventoy_unix_desc_flag) <= grub_ventoy_unix_mod_new_len; i += 16)
+    if (g_conf_new_len > 0)
     {
-      if (byte[i] == 0xFF && byte[i + 1] == 0xEE
-          && grub_memcmp (byte + i, grub_ventoy_unix_desc_flag,
-                          sizeof (grub_ventoy_unix_desc_flag)) == 0)
-        break;
+        /* loader.conf */
+        cur->img_offset = g_conf_override_offset;
+        cur->override_size = sizeof(ventoy_iso9660_override);
+        dirent = (ventoy_iso9660_override *)cur->override_data;
+        dirent->first_sector    = (grub_uint32_t)sector;
+        dirent->size            = (grub_uint32_t)g_conf_new_len;
+        dirent->first_sector_be = grub_swap_bytes32(dirent->first_sector);
+        dirent->size_be         = grub_swap_bytes32(dirent->size);
+        sector += (dirent->size + 2047) / 2048;
+        cur++;
     }
 
-  if (i + sizeof (grub_ventoy_unix_desc_flag) > grub_ventoy_unix_mod_new_len)
-    return;
-
-  desc = (ventoy_image_desc *) (byte + i);
-  chunk_memsize = (grub_size_t) chunk_list->cur_chunk * sizeof (ventoy_img_chunk);
-  if (i + sizeof (*desc) + chunk_memsize > grub_ventoy_unix_mod_new_len)
-    return;
-
-  desc->disk_size = chain->os_param.vtoy_disk_size;
-  desc->part1_size = 0;
-  grub_memcpy (desc->disk_uuid, chain->os_param.vtoy_disk_guid, 16);
-  grub_memcpy (desc->disk_signature, chain->os_param.vtoy_disk_signature, 4);
-  desc->img_chunk_count = chunk_list->cur_chunk;
-  grub_memcpy (desc + 1, chunk_list->chunk, chunk_memsize);
-}
-
-static int
-grub_ventoy_unix_gzip_compress (void *mem_in, grub_size_t mem_in_len,
-                                void *mem_out, grub_size_t mem_out_len)
-{
-  mz_stream stream;
-  grub_uint8_t *outbuf;
-  static const grub_uint8_t hdr[10] =
+    if (g_mod_new_len > 0)
     {
-      0x1F, 0x8B, 8, 0, 0, 0, 0, 0, 4, 3
-    };
-
-  if (!mem_in || !mem_out || mem_out_len <= sizeof (hdr) + 8)
-    return -1;
-
-  grub_memset (&stream, 0, sizeof (stream));
-  if (mz_deflateInit2 (&stream, 1, MZ_DEFLATED, -MZ_DEFAULT_WINDOW_BITS,
-                       6, MZ_DEFAULT_STRATEGY) != MZ_OK)
-    return -1;
-
-  outbuf = (grub_uint8_t *) mem_out;
-  mem_out_len -= sizeof (hdr) + 8;
-  grub_memcpy (outbuf, hdr, sizeof (hdr));
-  outbuf += sizeof (hdr);
-
-  stream.avail_in = (unsigned int) mem_in_len;
-  stream.next_in = mem_in;
-  stream.avail_out = (unsigned int) mem_out_len;
-  stream.next_out = outbuf;
-
-  if (mz_deflate (&stream, MZ_FINISH) != MZ_STREAM_END)
-    {
-      mz_deflateEnd (&stream);
-      return -1;
+        /* mod.ko */
+        cur->img_offset = g_mod_override_offset;
+        cur->override_size = sizeof(ventoy_iso9660_override);
+        dirent = (ventoy_iso9660_override *)cur->override_data;
+        dirent->first_sector    = (grub_uint32_t)sector;
+        dirent->size            = (grub_uint32_t)g_mod_new_len;
+        dirent->first_sector_be = grub_swap_bytes32(dirent->first_sector);
+        dirent->size_be         = grub_swap_bytes32(dirent->size);
+        sector += (dirent->size + 2047) / 2048;
+        cur++;
     }
 
-  mz_deflateEnd (&stream);
-
-  outbuf += stream.total_out;
-  *(grub_uint32_t *) outbuf = grub_getcrc32c (0, outbuf, stream.total_out);
-  *(grub_uint32_t *) (outbuf + 4) = (grub_uint32_t) (stream.total_out);
-
-  return (int) (stream.total_out + sizeof (hdr) + 8);
-}
-
-static grub_err_t
-grub_cmd_vt_unix_reset (grub_extcmd_context_t ctxt __attribute__ ((unused)),
-                        int argc __attribute__ ((unused)),
-                        char **args __attribute__ ((unused)))
-{
-  grub_ventoy_unix_reset_state ();
-  return GRUB_ERR_NONE;
-}
-
-static grub_err_t
-grub_cmd_vt_unix_check_vlnk (grub_extcmd_context_t ctxt __attribute__ ((unused)),
-                             int argc, char **args)
-{
-  if (argc != 1)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT, "path expected");
-
-  grub_ventoy_unix_vlnk_boot = grub_ventoy_is_vlnk_name (args[0]) ? 1 : 0;
-  return GRUB_ERR_NONE;
-}
-
-static grub_err_t
-grub_cmd_vt_unix_parse_freebsd_ver (grub_extcmd_context_t ctxt __attribute__ ((unused)),
-                                    int argc, char **args)
-{
-  grub_file_t file;
-  char *buf;
-  grub_size_t size;
-  char *cur;
-  char *eol;
-
-  if (argc != 2)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT,
-                       "usage: vt_unix_parse_freebsd_ver FILE VAR");
-
-  file = grub_file_open (args[0], GRUB_FILE_TYPE_LOOPBACK);
-  if (!file)
-    return grub_errno ? grub_errno :
-                       grub_error (GRUB_ERR_FILE_NOT_FOUND,
-                                   "failed to open %s", args[0]);
-
-  size = grub_file_size (file);
-  buf = grub_zalloc (size + 1);
-  if (!buf)
+    if (g_ko_fillmap_len > 0)
     {
-      grub_file_close (file);
-      return grub_errno;
-    }
+        data = g_ko_fillmap_data;
+        offset = g_mod_override_offset;
 
-  if (size > 0 && grub_file_read (file, buf, size) < 0)
-    {
-      grub_file_close (file);
-      grub_free (buf);
-      return grub_errno ? grub_errno :
-                         grub_error (GRUB_ERR_READ_ERROR,
-                                     "failed to read %s", args[0]);
-    }
-
-  grub_file_close (file);
-
-  cur = buf;
-  while (cur && *cur)
-    {
-      if (grub_strncmp (cur, "USERLAND_VERSION", 16) == 0)
+        ventoy_unix_fill_map_data(chain, (struct g_ventoy_map *)data);
+        
+        for (i = 0; i < g_ko_fillmap_len / 512; i++)
         {
-          eol = cur;
-          while (*eol && *eol != '\r' && *eol != '\n')
-            eol++;
-          *eol = '\0';
-          grub_env_set (args[1], cur);
-          grub_env_export (args[1]);
-          grub_free (buf);
-          return GRUB_ERR_NONE;
+            cur->img_offset = offset;
+            cur->override_size = 512;
+            grub_memcpy(cur->override_data, data, 512);
+
+            offset += 512;
+            data += 512;
+            cur++;
         }
 
-      eol = cur;
-      while (*eol && *eol != '\r' && *eol != '\n')
-        eol++;
-      if (*eol == '\0')
-        break;
-      while (*eol == '\r' || *eol == '\n')
-        eol++;
-      cur = eol;
+        left = (g_ko_fillmap_len % 512);
+        if (left > 0)
+        {
+            cur->img_offset = offset;
+            cur->override_size = left;
+            grub_memcpy(cur->override_data, data, left);
+
+            offset += left;
+            cur++;
+        }
     }
 
-  grub_env_unset (args[1]);
-  grub_free (buf);
-  return GRUB_ERR_NONE;
+    return;
 }
 
-static grub_err_t
-grub_cmd_vt_parse_freenas_ver (grub_extcmd_context_t ctxt __attribute__ ((unused)),
-                               int argc, char **args)
+static void ventoy_unix_fill_virt_data(    grub_uint64_t isosize, ventoy_chain_head *chain)
 {
-  grub_file_t file;
-  char *buf;
-  grub_size_t size;
-  char *pos;
-  char *end;
+    grub_uint64_t sector;
+    grub_uint32_t offset;
+    grub_uint32_t data_secs;
+    char *override;
+    ventoy_virt_chunk *cur;
 
-  if (argc != 2)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT,
-                       "usage: vt_parse_freenas_ver FILE VAR");
+    override = (char *)chain + chain->virt_chunk_offset;
+    cur = (ventoy_virt_chunk *)override;
+    
+    sector = (isosize + 2047) / 2048;
+    offset = 2 * sizeof(ventoy_virt_chunk);
 
-  file = grub_file_open (args[0], GRUB_FILE_TYPE_LOOPBACK);
-  if (!file)
-    return grub_errno ? grub_errno :
-                       grub_error (GRUB_ERR_FILE_NOT_FOUND,
-                                   "failed to open %s", args[0]);
-
-  size = grub_file_size (file);
-  buf = grub_malloc (size + 1);
-  if (!buf)
+    if (g_conf_new_len > 0)
     {
-      grub_file_close (file);
-      return grub_errno;
+        ventoy_unix_fill_virt(g_conf_new_data, g_conf_new_len);
     }
 
-  if (size > 0 && grub_file_read (file, buf, size) < 0)
+    if (g_mod_new_len > 0)
     {
-      grub_file_close (file);
-      grub_free (buf);
-      return grub_errno ? grub_errno :
-                         grub_error (GRUB_ERR_READ_ERROR,
-                                     "failed to read %s", args[0]);
+        if (g_mod_search_magic > 0)
+        {
+            ventoy_unix_fill_map_data(chain, (struct g_ventoy_map *)(g_mod_new_data + g_mod_search_magic));
+        }
+    
+        ventoy_unix_fill_virt(g_mod_new_data, g_mod_new_len);
     }
-  grub_file_close (file);
-  buf[size] = '\0';
-
-  pos = grub_strstr (buf, "\"Version\"");
-  if (!pos)
-    pos = grub_strstr (buf, "Version");
-
-  if (!pos)
-    {
-      grub_env_unset (args[1]);
-      grub_free (buf);
-      return GRUB_ERR_NONE;
-    }
-
-  pos = grub_strchr (pos, ':');
-  if (!pos)
-    {
-      grub_env_unset (args[1]);
-      grub_free (buf);
-      return GRUB_ERR_NONE;
-    }
-  pos++;
-  while (*pos == ' ' || *pos == '\t' || *pos == '"' || *pos == '\'')
-    pos++;
-
-  if (grub_strncmp (pos, "TrueNAS-", 8) == 0)
-    pos += 8;
-
-  end = pos;
-  while (*end && *end != '"' && *end != '\'' && *end != ','
-         && *end != '\r' && *end != '\n')
-    end++;
-  *end = '\0';
-
-  if (*pos)
-    {
-      grub_env_set (args[1], pos);
-      grub_env_export (args[1]);
-    }
-  else
-    {
-      grub_env_unset (args[1]);
-    }
-
-  grub_free (buf);
-  return GRUB_ERR_NONE;
+    
+    return;
 }
 
-static grub_err_t
-grub_cmd_vt_unix_parse_freebsd_ver_elf (grub_extcmd_context_t ctxt __attribute__ ((unused)),
-                                        int argc, char **args)
+static int ventoy_freebsd_append_conf(char *buf, const char *isopath, const char *alias)
 {
-  grub_elf_t elf = 0;
-  void *hdr = 0;
-  char *str = 0;
-  char *data = 0;
-  grub_off_t offset = 0;
-  grub_uint32_t len = 0;
-  char ver[64] = { 0 };
-  int j;
-  int k;
+    int pos = 0;
+    grub_uint32_t i;
+    grub_disk_t disk;
+    grub_file_t isofile;
+    char uuid[64] = {0};
+    const char *val = NULL;
+    ventoy_img_chunk *chunk;
+    grub_uint8_t disk_sig[4];
+    grub_uint8_t disk_guid[16];
 
-  if (argc != 3)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT,
-                       "usage: vt_unix_parse_freebsd_ver_elf FILE {32|64} VAR");
-
-  data = grub_zalloc (8192);
-  if (!data)
-    return grub_errno;
-
-  elf = grub_elf_open (args[0], GRUB_FILE_TYPE_LOOPBACK);
-  if (!elf)
+    debug("ventoy_freebsd_append_conf %s\n", isopath);
+    
+    isofile = ventoy_grub_file_open(VENTOY_FILE_TYPE, "%s", isopath);
+    if (!isofile)
     {
-      grub_free (data);
-      return grub_errno ? grub_errno :
-                         grub_error (GRUB_ERR_BAD_FILE_TYPE,
-                                     "failed to parse ELF %s", args[0]);
+        return 1;
     }
 
-  if (args[1][0] == '6')
+    vtoy_ssprintf(buf, pos, "ventoy_load=\"%s\"\n", "YES");
+    vtoy_ssprintf(buf, pos, "ventoy_name=\"%s\"\n", g_ko_mod_path);
+    
+    if (alias)
     {
-      Elf64_Ehdr *e = &elf->ehdr.ehdr64;
-      Elf64_Shdr *h;
-      Elf64_Shdr *s;
-      Elf64_Shdr *t;
-      Elf64_Half i;
+        vtoy_ssprintf(buf, pos, "hint.ventoy.0.alias=\"%s\"\n", alias);
+    }
 
-      h = hdr = grub_zalloc (e->e_shnum * e->e_shentsize);
-      if (!h)
+    if (g_unix_vlnk_boot)
+    {
+        vtoy_ssprintf(buf, pos, "hint.ventoy.0.vlnk=%d\n", 1);
+    }
+
+    val = ventoy_get_env("VTOY_UNIX_REMOUNT");
+    if (val && val[0] == '1' && val[1] == 0)
+    {
+        vtoy_ssprintf(buf, pos, "hint.ventoy.0.remount=%d\n", 1);
+    }
+
+    if (g_mod_search_magic)
+    {
+        debug("hint.ventoy NO need\n");
         goto out;
-
-      grub_file_seek (elf->file, e->e_shoff);
-      grub_file_read (elf->file, h, e->e_shnum * e->e_shentsize);
-
-      s = (Elf64_Shdr *) ((char *) h + e->e_shstrndx * e->e_shentsize);
-      str = grub_malloc (s->sh_size + 1);
-      if (!str)
-        goto out;
-      str[s->sh_size] = 0;
-
-      grub_file_seek (elf->file, s->sh_offset);
-      grub_file_read (elf->file, str, s->sh_size);
-
-      for (t = h, i = 0; i < e->e_shnum; i++)
-        {
-          if (grub_strcmp (str + t->sh_name, ".data") == 0)
-            {
-              offset = t->sh_offset;
-              len = t->sh_size;
-              break;
-            }
-          t = (Elf64_Shdr *) ((char *) t + e->e_shentsize);
-        }
-    }
-  else
-    {
-      Elf32_Ehdr *e = &elf->ehdr.ehdr32;
-      Elf32_Shdr *h;
-      Elf32_Shdr *s;
-      Elf32_Shdr *t;
-      Elf32_Half i;
-
-      h = hdr = grub_zalloc (e->e_shnum * e->e_shentsize);
-      if (!h)
-        goto out;
-
-      grub_file_seek (elf->file, e->e_shoff);
-      grub_file_read (elf->file, h, e->e_shnum * e->e_shentsize);
-
-      s = (Elf32_Shdr *) ((char *) h + e->e_shstrndx * e->e_shentsize);
-      str = grub_malloc (s->sh_size + 1);
-      if (!str)
-        goto out;
-      str[s->sh_size] = 0;
-
-      grub_file_seek (elf->file, s->sh_offset);
-      grub_file_read (elf->file, str, s->sh_size);
-
-      for (t = h, i = 0; i < e->e_shnum; i++)
-        {
-          if (grub_strcmp (str + t->sh_name, ".data") == 0)
-            {
-              offset = t->sh_offset;
-              len = t->sh_size;
-              break;
-            }
-          t = (Elf32_Shdr *) ((char *) t + e->e_shentsize);
-        }
     }
 
-  if (offset == 0 || len == 0)
-    goto out;
+    debug("Fill hint.ventoy info\n");
+    
+    disk = isofile->device->disk;
 
-  if (len < 8192)
+    ventoy_get_disk_guid(isofile->name, disk_guid, disk_sig);
+
+    for (i = 0; i < 16; i++)
     {
-      grub_file_seek (elf->file, offset);
-      grub_memset (data, 0, 8192);
-      grub_file_read (elf->file, data, len);
-    }
-  else
-    {
-      grub_file_seek (elf->file, offset + len - 8192);
-      grub_file_read (elf->file, data, 8192);
+        grub_snprintf(uuid + i * 2, sizeof(uuid), "%02x", disk_guid[i]);
     }
 
-  for (j = 0; j < 8192 - 12; j++)
-    {
-      if (grub_strncmp (data + j, "@(#)FreeBSD ", 12) == 0)
-        {
-          for (k = j + 12; k < 8192; k++)
-            {
-              if (!grub_isdigit (data[k]) && data[k] != '.')
-                {
-                  data[k] = 0;
-                  break;
-                }
-            }
+    vtoy_ssprintf(buf, pos, "hint.ventoy.0.disksize=%llu\n", (ulonglong)(disk->total_sectors * (1 << disk->log_sector_size)));
+    vtoy_ssprintf(buf, pos, "hint.ventoy.0.diskuuid=\"%s\"\n", uuid);
+    vtoy_ssprintf(buf, pos, "hint.ventoy.0.disksignature=%02x%02x%02x%02x\n", disk_sig[0], disk_sig[1], disk_sig[2], disk_sig[3]);
+    vtoy_ssprintf(buf, pos, "hint.ventoy.0.segnum=%u\n", g_img_chunk_list.cur_chunk);
 
-          grub_snprintf (ver, sizeof (ver), "%s", data + j + 12);
-          break;
-        }
-    }
-
-  if (ver[0])
+    for (i = 0; i < g_img_chunk_list.cur_chunk; i++)
     {
-      k = (int) grub_strtoul (ver, 0, 10);
-      grub_snprintf (ver, sizeof (ver), "%d.x", k);
-      grub_env_set (args[2], ver);
-      grub_env_export (args[2]);
+        chunk = g_img_chunk_list.chunk + i;
+        vtoy_ssprintf(buf, pos, "hint.ventoy.%u.seg=\"0x%llx@0x%llx\"\n", 
+            i, (ulonglong)(chunk->disk_start_sector * 512),
+            (ulonglong)((chunk->disk_end_sector + 1) * 512));
     }
 
 out:
-  grub_free (str);
-  grub_free (hdr);
-  grub_free (data);
-  if (elf)
-    grub_elf_close (elf);
-
-  return GRUB_ERR_NONE;
+    grub_file_close(isofile);
+    return pos;
 }
 
-static grub_err_t
-grub_cmd_vt_unix_replace_grub_conf (grub_extcmd_context_t ctxt __attribute__ ((unused)),
-                                    int argc, char **args)
+static int ventoy_dragonfly_append_conf(char *buf, const char *isopath)
 {
-  grub_uint64_t offset;
-  const char *confile = "/boot/grub/grub.cfg";
-  grub_size_t old_len;
-  grub_size_t ext_len;
-  grub_size_t copy_len;
-  char *pos;
-  char *newbuf;
-  char extcfg[512];
-  grub_size_t extpos = 0;
+    int pos = 0;
 
-  if (argc != 1 && argc != 2)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT,
-                       "usage: vt_unix_replace_grub_conf KO [ALIAS]");
+    debug("ventoy_dragonfly_append_conf %s\n", isopath);
 
-  if (grub_ventoy_unix_get_file_override (confile, &offset) != 0)
-    return grub_error (GRUB_ERR_FILE_NOT_FOUND, "grub.cfg not found in loop ISO");
+    vtoy_ssprintf(buf, pos, "tmpfs_load=\"%s\"\n", "YES");
+    vtoy_ssprintf(buf, pos, "dm_target_linear_load=\"%s\"\n", "YES");
+    vtoy_ssprintf(buf, pos, "initrd.img_load=\"%s\"\n", "YES");
+    vtoy_ssprintf(buf, pos, "initrd.img_type=\"%s\"\n", "md_image");
+    vtoy_ssprintf(buf, pos, "vfs.root.mountfrom=\"%s\"\n", "ufs:md0s0");
 
-  if (grub_ventoy_unix_replace_blob ("(loop)/boot/grub/grub.cfg",
-                                     &grub_ventoy_unix_conf_new_data,
-                                     &grub_ventoy_unix_conf_new_len)
-      != GRUB_ERR_NONE)
-    return grub_errno;
-
-  grub_ventoy_unix_conf_override_offset = offset;
-  old_len = grub_ventoy_unix_conf_new_len;
-  pos = grub_strstr (grub_ventoy_unix_conf_new_data, "kfreebsd /boot/kernel/kernel");
-  if (!pos)
-    return GRUB_ERR_NONE;
-
-  pos += grub_strlen ("kfreebsd /boot/kernel/kernel");
-  if (grub_strncmp (pos, ".gz", 3) == 0)
-    pos += 3;
-
-  if (argc == 2)
-    extpos = grub_ventoy_append_text (extcfg, sizeof (extcfg), extpos,
-                                      ";kfreebsd_module_elf %s; set kFreeBSD.hint.ventoy.0.alias=\"%s\"",
-                                      args[0], args[1]);
-  else
-    extpos = grub_ventoy_append_text (extcfg, sizeof (extcfg), extpos,
-                                      ";kfreebsd_module_elf %s", args[0]);
-
-  if (grub_ventoy_unix_vlnk_boot)
-    extpos = grub_ventoy_append_text (extcfg, sizeof (extcfg), extpos,
-                                      ";set kFreeBSD.hint.ventoy.0.vlnk=%d", 1);
-
-  if (grub_ventoy_env_is_one_local ("VTOY_UNIX_REMOUNT"))
-    extpos = grub_ventoy_append_text (extcfg, sizeof (extcfg), extpos,
-                                      ";set kFreeBSD.hint.ventoy.0.remount=%d", 1);
-
-  extcfg[extpos] = '\0';
-  ext_len = extpos;
-  if (ext_len == 0)
-    return GRUB_ERR_NONE;
-
-  newbuf = grub_malloc (old_len + ext_len + 1);
-  if (!newbuf)
-    return grub_errno;
-
-  copy_len = (grub_size_t) (pos - grub_ventoy_unix_conf_new_data);
-  grub_memcpy (newbuf, grub_ventoy_unix_conf_new_data, copy_len);
-  grub_memcpy (newbuf + copy_len, extcfg, ext_len);
-  grub_memcpy (newbuf + copy_len + ext_len, pos, old_len - copy_len + 1);
-
-  grub_free (grub_ventoy_unix_conf_new_data);
-  grub_ventoy_unix_conf_new_data = newbuf;
-  grub_ventoy_unix_conf_new_len = old_len + ext_len;
-  return GRUB_ERR_NONE;
+    return pos;
 }
 
-static grub_err_t
-grub_cmd_vt_unix_replace_conf (grub_extcmd_context_t ctxt __attribute__ ((unused)),
-                               int argc, char **args)
+grub_err_t ventoy_cmd_unix_reset(grub_extcmd_context_t ctxt, int argc, char **args)
 {
-  const char *loader_conf[] =
-    {
-      "/boot/loader.conf",
-      "/boot/defaults/loader.conf",
-      0
-    };
-  const char *confile = 0;
-  grub_uint64_t offset = 0;
-  grub_size_t append_len;
-  grub_size_t cap;
-  char *newbuf;
-  grub_uint32_t i;
+    (void)ctxt;
+    (void)argc;
+    (void)args;
+    
+    g_unix_vlnk_boot = 0;
+    g_mod_search_magic = 0;
+    g_conf_new_len = 0;
+    g_mod_new_len = 0;
+    g_mod_override_offset = 0;
+    g_conf_override_offset = 0;
+    g_ko_fillmap_len = 0;
 
-  if (argc != 2 && argc != 3)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT,
-                       "usage: vt_unix_replace_conf {FreeBSD|DragonFly} ISOPATH [ALIAS]");
+    check_free(g_mod_new_data, grub_free);
+    check_free(g_conf_new_data, grub_free);
+    check_free(g_ko_fillmap_data, grub_free);
 
-  for (i = 0; loader_conf[i]; i++)
+    VENTOY_CMD_RETURN(GRUB_ERR_NONE);
+}
+
+grub_err_t ventoy_cmd_unix_check_vlnk(grub_extcmd_context_t ctxt, int argc, char **args)
+{
+    grub_file_t file;
+
+    (void)ctxt;
+
+    if (argc != 1)
     {
-      if (grub_ventoy_unix_get_file_override (loader_conf[i], &offset) == 0)
+        return 1;
+    }
+
+    file = grub_file_open(args[0], VENTOY_FILE_TYPE);
+    if (file)
+    {
+        g_unix_vlnk_boot = ventoy_compat_get_file_vlnk(file);
+        grub_file_close(file);
+    }
+
+    VENTOY_CMD_RETURN(GRUB_ERR_NONE);
+}
+
+grub_err_t ventoy_cmd_parse_freenas_ver(grub_extcmd_context_t ctxt, int argc, char **args)
+{
+    grub_file_t file;
+    const char *ver = NULL;
+    char *buf = NULL;
+    VTOY_JSON *json = NULL;
+    
+    (void)ctxt;
+    (void)argc;
+
+    file = ventoy_grub_file_open(VENTOY_FILE_TYPE, "%s", args[0]);
+    if (!file)
+    {
+        debug("Failed to open file %s\n", args[0]);
+        return 1;
+    }
+
+    buf = grub_malloc(file->size + 2);
+    if (!buf)
+    {
+        grub_file_close(file);
+        return 0;
+    }
+    grub_file_read(file, buf, file->size);
+    buf[file->size] = 0;
+
+    json = vtoy_json_create();
+    if (!json)
+    {
+        goto end;
+    }
+
+    if (vtoy_json_parse(json, buf))
+    {
+        goto end;
+    }
+
+    ver = vtoy_json_get_string_ex(json->pstChild, "Version");
+    if (ver)
+    {
+        debug("NAS version:<%s>\n", ver);
+        if (grub_strncmp(ver, "TrueNAS-", 8) == 0)
         {
-          confile = loader_conf[i];
-          break;
+            ver += 8;
         }
+        ventoy_set_env(args[1], ver);
     }
-
-  if (!confile)
-    return grub_error (GRUB_ERR_FILE_NOT_FOUND,
-                       "loader.conf not found in loop ISO");
-
-  {
-    char *full = grub_xasprintf ("(loop)%s", confile);
-    if (!full)
-      return grub_errno;
-
-    if (grub_ventoy_unix_replace_blob (full,
-                                       &grub_ventoy_unix_conf_new_data,
-                                       &grub_ventoy_unix_conf_new_len)
-        != GRUB_ERR_NONE)
-      {
-        grub_free (full);
-        return grub_errno;
-      }
-    grub_free (full);
-  }
-
-  grub_ventoy_unix_conf_override_offset = offset;
-
-  cap = grub_ventoy_unix_conf_new_len + 8192;
-  newbuf = grub_malloc (cap);
-  if (!newbuf)
-    return grub_errno;
-
-  grub_memcpy (newbuf, grub_ventoy_unix_conf_new_data,
-               grub_ventoy_unix_conf_new_len);
-
-  if (grub_strcmp (args[0], "FreeBSD") == 0)
-    append_len = grub_ventoy_unix_append_freebsd_conf (
-        newbuf + grub_ventoy_unix_conf_new_len,
-        cap - grub_ventoy_unix_conf_new_len,
-        (argc > 2) ? args[2] : 0);
-  else if (grub_strcmp (args[0], "DragonFly") == 0)
-    append_len = grub_ventoy_unix_append_dragonfly_conf (
-        newbuf + grub_ventoy_unix_conf_new_len,
-        cap - grub_ventoy_unix_conf_new_len);
-  else
+    else
     {
-      grub_free (newbuf);
-      return grub_error (GRUB_ERR_BAD_ARGUMENT,
-                         "unsupported unix type %s", args[0]);
+        debug("NAS version:<%s>\n", "NOT FOUND");
+        grub_env_unset(args[1]);
     }
 
-  grub_ventoy_unix_conf_new_len += append_len;
-  newbuf[grub_ventoy_unix_conf_new_len] = '\0';
-  grub_free (grub_ventoy_unix_conf_new_data);
-  grub_ventoy_unix_conf_new_data = newbuf;
-  return GRUB_ERR_NONE;
+end:
+    grub_check_free(buf);
+    check_free(json, vtoy_json_destroy);
+    grub_file_close(file);
+
+    VENTOY_CMD_RETURN(GRUB_ERR_NONE);
 }
 
-static grub_err_t
-grub_cmd_vt_unix_replace_ko (grub_extcmd_context_t ctxt __attribute__ ((unused)),
-                             int argc, char **args)
+grub_err_t ventoy_cmd_unix_freebsd_ver(grub_extcmd_context_t ctxt, int argc, char **args)
 {
-  grub_uint64_t offset;
+    grub_file_t file;
+    char *buf;
+    char *start = NULL;
+    char *nextline = NULL;
+    
+    (void)ctxt;
+    (void)argc;
+    (void)args;
 
-  if (argc != 2)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT,
-                       "usage: vt_unix_replace_ko OLD_PATH NEW_FILE");
-
-  if (grub_ventoy_unix_get_file_override (args[0], &offset) != 0)
-    return grub_error (GRUB_ERR_FILE_NOT_FOUND,
-                       "target ko not found in loop ISO: %s", args[0]);
-
-  grub_snprintf (grub_ventoy_unix_ko_mod_path,
-                 sizeof (grub_ventoy_unix_ko_mod_path), "%s", args[0]);
-  grub_ventoy_unix_mod_override_offset = offset;
-
-  if (grub_ventoy_unix_replace_blob (args[1],
-                                     &grub_ventoy_unix_mod_new_data,
-                                     &grub_ventoy_unix_mod_new_len)
-      != GRUB_ERR_NONE)
-    return grub_errno;
-
-  grub_ventoy_unix_mod_search_magic =
-      grub_ventoy_unix_search_map_magic (grub_ventoy_unix_mod_new_data,
-                                         grub_ventoy_unix_mod_new_len);
-
-  return GRUB_ERR_NONE;
-}
-
-static grub_err_t
-grub_cmd_vt_unix_ko_fillmap (grub_extcmd_context_t ctxt __attribute__ ((unused)),
-                             int argc, char **args)
-{
-  grub_file_t file;
-  char *full;
-  grub_uint32_t magic[4];
-  grub_size_t i;
-  grub_uint64_t offset;
-  int found = 0;
-
-  if (argc != 1)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT,
-                       "usage: vt_unix_ko_fillmap KO_PATH");
-
-  full = grub_xasprintf ("(loop)%s", args[0]);
-  if (!full)
-    return grub_errno;
-
-  file = grub_file_open (full, GRUB_FILE_TYPE_LOOPBACK);
-  grub_free (full);
-  if (!file)
-    return grub_errno ? grub_errno :
-                       grub_error (GRUB_ERR_FILE_NOT_FOUND,
-                                   "ko fillmap file not found: %s", args[0]);
-
-  grub_memset (magic, 0, sizeof (magic));
-  if (grub_file_read (file, magic, 4) < 0)
+    file = ventoy_grub_file_open(GRUB_FILE_TYPE_LINUX_INITRD, "%s", args[0]);
+    if (!file)
     {
-      grub_file_close (file);
-      return grub_errno ? grub_errno :
-                         grub_error (GRUB_ERR_READ_ERROR,
-                                     "failed to read %s", args[0]);
+        debug("Failed to open file %s\n", args[0]);
+        return 1;
     }
-  offset = grub_iso9660_get_last_read_pos (file);
 
-  for (i = 0; i < (grub_size_t) grub_file_size (file); i += 65536)
+    buf = grub_zalloc(file->size + 2);
+    if (!buf)
     {
-      grub_file_seek (file, (grub_off_t) i);
-      grub_memset (magic, 0, sizeof (magic));
-      if (grub_file_read (file, magic, sizeof (magic)) < 0)
+        grub_file_close(file);
+        return 0;
+    }
+    grub_file_read(file, buf, file->size);
+
+    for (start = buf; start; start = nextline)
+    {
+        if (grub_strncmp(start, "USERLAND_VERSION", 16) == 0)
         {
-          grub_errno = GRUB_ERR_NONE;
-          continue;
-        }
-
-      if (magic[0] == GRUB_VENTOY_UNIX_SEG_MAGIC0
-          && magic[1] == GRUB_VENTOY_UNIX_SEG_MAGIC1
-          && magic[2] == GRUB_VENTOY_UNIX_SEG_MAGIC2
-          && magic[3] == GRUB_VENTOY_UNIX_SEG_MAGIC3)
-        {
-          offset += i;
-          found = 1;
-          break;
-        }
-    }
-
-  grub_file_close (file);
-
-  if (!found)
-    return grub_error (GRUB_ERR_BAD_FILE_TYPE,
-                       "no ventoy unix map marker in %s", args[0]);
-
-  grub_ventoy_unix_mod_override_offset = offset;
-  grub_ventoy_unix_ko_fillmap_enable = 1;
-  grub_ventoy_unix_ko_fillmap_len = 0;
-  grub_free (grub_ventoy_unix_ko_fillmap_data);
-  grub_ventoy_unix_ko_fillmap_data = 0;
-
-  if (!grub_ventoy_unix_ko_mod_path[0])
-    grub_snprintf (grub_ventoy_unix_ko_mod_path,
-                   sizeof (grub_ventoy_unix_ko_mod_path), "%s", args[0]);
-
-  return GRUB_ERR_NONE;
-}
-
-static grub_err_t
-grub_cmd_vt_unix_fill_image_desc (grub_extcmd_context_t ctxt __attribute__ ((unused)),
-                                  int argc __attribute__ ((unused)),
-                                  char **args __attribute__ ((unused)))
-{
-  grub_ventoy_unix_fill_image_desc_pending = 1;
-  return GRUB_ERR_NONE;
-}
-
-static grub_err_t
-grub_cmd_vt_unix_gzip_new_ko (grub_extcmd_context_t ctxt __attribute__ ((unused)),
-                              int argc __attribute__ ((unused)),
-                              char **args __attribute__ ((unused)))
-{
-  int new_len;
-  grub_uint8_t *buf;
-
-  if (!grub_ventoy_unix_mod_new_data || grub_ventoy_unix_mod_new_len == 0)
-    return GRUB_ERR_NONE;
-
-  buf = grub_malloc (grub_ventoy_unix_mod_new_len);
-  if (!buf)
-    return grub_errno;
-
-  new_len = grub_ventoy_unix_gzip_compress (grub_ventoy_unix_mod_new_data,
-                                            grub_ventoy_unix_mod_new_len,
-                                            buf, grub_ventoy_unix_mod_new_len);
-  if (new_len <= 0)
-    {
-      grub_free (buf);
-      return grub_error (GRUB_ERR_BAD_COMPRESSED_DATA,
-                         "vt_unix_gzip_new_ko compression failed");
-    }
-
-  grub_free (grub_ventoy_unix_mod_new_data);
-  grub_ventoy_unix_mod_new_data = (char *) buf;
-  grub_ventoy_unix_mod_new_len = (grub_size_t) new_len;
-
-  return GRUB_ERR_NONE;
-}
-
-static grub_err_t
-grub_cmd_vt_unix_chain_data (grub_extcmd_context_t ctxt __attribute__ ((unused)),
-                             int argc, char **args)
-{
-  grub_file_t file;
-  ventoy_img_chunk_list chunk_list;
-  ventoy_chain_head *chain;
-  ventoy_override_chunk *override_cur;
-  ventoy_virt_chunk *virt_cur;
-  struct grub_ventoy_unix_iso9660_override *dirent;
-  grub_size_t chunk_bytes;
-  grub_size_t override_count = 0;
-  grub_size_t virt_count = 0;
-  grub_size_t payload_size = 0;
-  grub_size_t chain_size;
-  grub_uint64_t sector;
-  grub_size_t virt_offset;
-  grub_size_t data_secs;
-  grub_size_t fillmap_count = 0;
-  grub_size_t fillmap_left;
-  grub_uint64_t fillmap_offset;
-  char *fillmap_cur;
-  grub_uint8_t iso_format = 0;
-
-  if (argc != 1)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT,
-                       "usage: vt_unix_chain_data FILE");
-
-  file = grub_file_open (args[0], GRUB_FILE_TYPE_LOOPBACK);
-  if (!file)
-    return grub_errno ? grub_errno :
-                       grub_error (GRUB_ERR_FILE_NOT_FOUND,
-                                   "failed to open %s", args[0]);
-
-  if (!file->device || !file->device->disk)
-    {
-      grub_file_close (file);
-      return grub_error (GRUB_ERR_BAD_DEVICE,
-                         "unix chain source must be disk backed");
-    }
-
-  if (file->fs && file->fs->name && grub_strcmp (file->fs->name, "udf") == 0)
-    iso_format = 1;
-
-  if (grub_ventoy_collect_chunks (file, &chunk_list) != GRUB_ERR_NONE)
-    {
-      grub_file_close (file);
-      return grub_errno;
-    }
-
-  if (grub_ventoy_unix_conf_new_data && grub_ventoy_unix_conf_new_len > 0
-      && grub_ventoy_unix_conf_override_offset > 0)
-    {
-      override_count++;
-      virt_count++;
-      payload_size += grub_ventoy_align_2k (grub_ventoy_unix_conf_new_len);
-    }
-
-  if (grub_ventoy_unix_mod_new_data && grub_ventoy_unix_mod_new_len > 0
-      && grub_ventoy_unix_mod_override_offset > 0)
-    {
-      override_count++;
-      virt_count++;
-      payload_size += grub_ventoy_align_2k (grub_ventoy_unix_mod_new_len);
-    }
-
-  if (grub_ventoy_unix_ko_fillmap_enable
-      && grub_ventoy_unix_mod_override_offset > 0
-      && chunk_list.cur_chunk > 0)
-    {
-      grub_size_t map_len;
-
-      map_len = GRUB_VTOY_OFFSET_OF (struct grub_ventoy_unix_map, seglist)
-                + chunk_list.cur_chunk * sizeof (struct grub_ventoy_unix_seg);
-      if (map_len > 0)
-        {
-          char *map_data;
-
-          map_data = grub_realloc (grub_ventoy_unix_ko_fillmap_data, map_len);
-          if (!map_data)
+            nextline = start;
+            while (*nextline && *nextline != '\r' && *nextline != '\n')
             {
-              grub_ventoy_free_chunks (&chunk_list);
-              grub_file_close (file);
-              return grub_errno;
+                nextline++;
             }
 
-          grub_ventoy_unix_ko_fillmap_data = map_data;
-          grub_ventoy_unix_ko_fillmap_len = map_len;
-          fillmap_count = map_len / 512;
-          if ((map_len % 512) > 0)
-            fillmap_count++;
-          override_count += fillmap_count;
+            *nextline = 0;            
+            break;
         }
+        nextline = ventoy_get_line(start);
     }
 
-  chain_size = grub_ventoy_chain_size (&chunk_list,
-                                       (grub_uint32_t) override_count,
-                                       (grub_uint32_t) virt_count);
-  chain_size += payload_size;
-
-  chain = grub_malloc (chain_size);
-  if (!chain)
+    if (start)
     {
-      grub_ventoy_free_chunks (&chunk_list);
-      grub_file_close (file);
-      return grub_errno;
+        debug("freebsd version:<%s>\n", start);
+        ventoy_set_env(args[1], start);
+    }
+    else
+    {
+        debug("freebsd version:<%s>\n", "NOT FOUND");
+        grub_env_unset(args[1]);
     }
 
-  if (grub_ventoy_chain_init (chain, file, &chunk_list) != GRUB_ERR_NONE)
+    grub_free(buf);
+    grub_file_close(file);
+    
+    VENTOY_CMD_RETURN(GRUB_ERR_NONE);
+}
+
+grub_err_t ventoy_cmd_unix_freebsd_ver_elf(grub_extcmd_context_t ctxt, int argc, char **args)
+{
+    int j;
+    int k;
+    grub_elf_t elf = NULL;
+    grub_off_t offset = 0;
+    grub_uint32_t len = 0;
+    char *str = NULL;
+    char *data = NULL;
+    void *hdr = NULL;
+    char ver[64] = {0};
+    
+    (void)ctxt;
+    (void)argc;
+    (void)args;
+
+    if (argc != 3)
     {
-      grub_free (chain);
-      grub_ventoy_free_chunks (&chunk_list);
-      grub_file_close (file);
-      return grub_errno;
+        debug("Invalid argc %d\n", argc);
+        return 1;
     }
 
-  chunk_bytes = chunk_list.cur_chunk * sizeof (ventoy_img_chunk);
-  grub_memcpy ((char *) chain + chain->img_chunk_offset,
-               chunk_list.chunk, chunk_bytes);
-
-  chain->override_chunk_offset = chain->img_chunk_offset + chunk_bytes;
-  chain->override_chunk_num = (grub_uint32_t) override_count;
-  chain->virt_chunk_offset = chain->override_chunk_offset +
-                             override_count * sizeof (ventoy_override_chunk);
-  chain->virt_chunk_num = (grub_uint32_t) virt_count;
-
-  chain->os_param.vtoy_reserved[2] = ventoy_chain_linux;
-  chain->os_param.vtoy_reserved[3] = iso_format;
-  chain->os_param.vtoy_reserved[4] = 0;
-  chain->os_param.vtoy_reserved[5] =
-      grub_ventoy_env_is_one_local ("VTOY_UNIX_REMOUNT") ? 1 : 0;
-  chain->os_param.vtoy_reserved[6] = grub_ventoy_unix_vlnk_boot ? 1 : 0;
-  grub_memcpy (chain->os_param.vtoy_reserved + 7,
-               chain->os_param.vtoy_disk_signature, 4);
-  grub_ventoy_refresh_osparam_checksum_local (&chain->os_param);
-
-  override_cur = (ventoy_override_chunk *) ((char *) chain +
-                                            chain->override_chunk_offset);
-  virt_cur = (ventoy_virt_chunk *) ((char *) chain + chain->virt_chunk_offset);
-
-  if (grub_ventoy_unix_mod_search_magic > 0)
+    data = grub_zalloc(8192);
+    if (!data)
     {
-      struct grub_ventoy_unix_map *map;
-
-      map = (struct grub_ventoy_unix_map *)
-          (grub_ventoy_unix_mod_new_data + grub_ventoy_unix_mod_search_magic);
-      grub_size_t map_len;
-
-      map_len = GRUB_VTOY_OFFSET_OF (struct grub_ventoy_unix_map, seglist)
-                + chunk_list.cur_chunk * sizeof (struct grub_ventoy_unix_seg);
-      if (grub_ventoy_unix_mod_search_magic + map_len <= grub_ventoy_unix_mod_new_len)
-        grub_ventoy_unix_fill_map_data (chain, &chunk_list, map, map_len);
+        goto out;
     }
 
-  if (grub_ventoy_unix_fill_image_desc_pending)
-    grub_ventoy_unix_fill_image_desc_blob (chain, &chunk_list);
-
-  sector = (grub_file_size (file) + 2047) / 2048;
-  virt_offset = virt_count * sizeof (ventoy_virt_chunk);
-
-  if (grub_ventoy_unix_conf_new_data && grub_ventoy_unix_conf_new_len > 0
-      && grub_ventoy_unix_conf_override_offset > 0)
+    elf = grub_elf_open(args[0], GRUB_FILE_TYPE_LINUX_INITRD);
+    if (!elf)
     {
-      override_cur->img_offset = grub_ventoy_unix_conf_override_offset;
-      override_cur->override_size = sizeof (*dirent);
-      dirent = (struct grub_ventoy_unix_iso9660_override *) override_cur->override_data;
-      dirent->first_sector = (grub_uint32_t) sector;
-      dirent->size = (grub_uint32_t) grub_ventoy_unix_conf_new_len;
-      dirent->first_sector_be = grub_swap_bytes32 (dirent->first_sector);
-      dirent->size_be = grub_swap_bytes32 (dirent->size);
-      override_cur++;
-
-      data_secs = (grub_ventoy_unix_conf_new_len + 2047) / 2048;
-      virt_cur->mem_sector_start = (grub_uint32_t) sector;
-      virt_cur->mem_sector_end = (grub_uint32_t) (sector + data_secs);
-      virt_cur->mem_sector_offset = (grub_uint32_t) virt_offset;
-      virt_cur->remap_sector_start = 0;
-      virt_cur->remap_sector_end = 0;
-      virt_cur->org_sector_start = 0;
-      grub_memcpy ((char *) chain + chain->virt_chunk_offset + virt_offset,
-                   grub_ventoy_unix_conf_new_data,
-                   grub_ventoy_unix_conf_new_len);
-      virt_cur++;
-
-      sector += data_secs;
-      virt_offset += grub_ventoy_align_2k (grub_ventoy_unix_conf_new_len);
-      chain->virt_img_size_in_bytes += data_secs * 2048;
+        debug("Failed to open file %s\n", args[0]);
+        goto out;
     }
 
-  if (grub_ventoy_unix_mod_new_data && grub_ventoy_unix_mod_new_len > 0
-      && grub_ventoy_unix_mod_override_offset > 0)
+    if (args[1][0] == '6')
     {
-      override_cur->img_offset = grub_ventoy_unix_mod_override_offset;
-      override_cur->override_size = sizeof (*dirent);
-      dirent = (struct grub_ventoy_unix_iso9660_override *) override_cur->override_data;
-      dirent->first_sector = (grub_uint32_t) sector;
-      dirent->size = (grub_uint32_t) grub_ventoy_unix_mod_new_len;
-      dirent->first_sector_be = grub_swap_bytes32 (dirent->first_sector);
-      dirent->size_be = grub_swap_bytes32 (dirent->size);
-      override_cur++;
-
-      data_secs = (grub_ventoy_unix_mod_new_len + 2047) / 2048;
-      virt_cur->mem_sector_start = (grub_uint32_t) sector;
-      virt_cur->mem_sector_end = (grub_uint32_t) (sector + data_secs);
-      virt_cur->mem_sector_offset = (grub_uint32_t) virt_offset;
-      virt_cur->remap_sector_start = 0;
-      virt_cur->remap_sector_end = 0;
-      virt_cur->org_sector_start = 0;
-      grub_memcpy ((char *) chain + chain->virt_chunk_offset + virt_offset,
-                   grub_ventoy_unix_mod_new_data,
-                   grub_ventoy_unix_mod_new_len);
-      virt_cur++;
-
-      sector += data_secs;
-      virt_offset += grub_ventoy_align_2k (grub_ventoy_unix_mod_new_len);
-      chain->virt_img_size_in_bytes += data_secs * 2048;
-    }
-
-  if (grub_ventoy_unix_ko_fillmap_enable
-      && grub_ventoy_unix_ko_fillmap_data
-      && grub_ventoy_unix_ko_fillmap_len > 0
-      && grub_ventoy_unix_mod_override_offset > 0)
-    {
-      grub_ventoy_unix_fill_map_data (
-          chain, &chunk_list,
-          (struct grub_ventoy_unix_map *) grub_ventoy_unix_ko_fillmap_data,
-          grub_ventoy_unix_ko_fillmap_len);
-
-      fillmap_cur = grub_ventoy_unix_ko_fillmap_data;
-      fillmap_left = grub_ventoy_unix_ko_fillmap_len;
-      fillmap_offset = grub_ventoy_unix_mod_override_offset;
-      while (fillmap_left > 0)
+        Elf64_Ehdr *e = &(elf->ehdr.ehdr64);
+        Elf64_Shdr *h;
+        Elf64_Shdr *s;
+        Elf64_Shdr *t;
+        Elf64_Half i;
+        
+        h = hdr = grub_zalloc(e->e_shnum * e->e_shentsize);
+        if (!h)
         {
-          grub_size_t this_size = (fillmap_left >= 512) ? 512 : fillmap_left;
+            goto out;
+        }
 
-          override_cur->img_offset = fillmap_offset;
-          override_cur->override_size = (grub_uint32_t) this_size;
-          grub_memcpy (override_cur->override_data, fillmap_cur, this_size);
-          override_cur++;
+        debug("read section header %u %u %u\n", e->e_shnum, e->e_shentsize, e->e_shstrndx);
+        grub_file_seek(elf->file, e->e_shoff);
+        grub_file_read(elf->file, h, e->e_shnum * e->e_shentsize);
 
-          fillmap_cur += this_size;
-          fillmap_offset += this_size;
-          fillmap_left -= this_size;
+        s = (Elf64_Shdr *)((char *)h + e->e_shstrndx * e->e_shentsize);        
+        str = grub_malloc(s->sh_size + 1);
+        if (!str)
+        {
+            goto out;
+        }
+        str[s->sh_size] = 0;
+
+        debug("read string table %u %u\n", (grub_uint32_t)s->sh_offset, (grub_uint32_t)s->sh_size);
+        grub_file_seek(elf->file, s->sh_offset);
+        grub_file_read(elf->file, str, s->sh_size);
+
+        for (t = h, i = 0; i < e->e_shnum; i++)
+        {
+            if (grub_strcmp(str + t->sh_name, ".data") == 0)
+            {
+                offset = t->sh_offset;
+                len = t->sh_size;
+                debug("find .data section at %u %u\n", (grub_uint32_t)offset, len);
+                break;
+            }
+            t = (Elf64_Shdr *)((char *)t + e->e_shentsize);
+        }
+    }
+    else
+    {
+        Elf32_Ehdr *e = &(elf->ehdr.ehdr32);
+        Elf32_Shdr *h;
+        Elf32_Shdr *s;
+        Elf32_Shdr *t;
+        Elf32_Half i;
+        
+        h = hdr = grub_zalloc(e->e_shnum * e->e_shentsize);
+        if (!h)
+        {
+            goto out;
+        }
+
+        debug("read section header %u %u %u\n", e->e_shnum, e->e_shentsize, e->e_shstrndx);
+        grub_file_seek(elf->file, e->e_shoff);
+        grub_file_read(elf->file, h, e->e_shnum * e->e_shentsize);
+
+        s = (Elf32_Shdr *)((char *)h + e->e_shstrndx * e->e_shentsize);        
+        str = grub_malloc(s->sh_size + 1);
+        if (!str)
+        {
+            goto out;
+        }
+        str[s->sh_size] = 0;
+
+        debug("read string table %u %u\n", (grub_uint32_t)s->sh_offset, (grub_uint32_t)s->sh_size);
+        grub_file_seek(elf->file, s->sh_offset);
+        grub_file_read(elf->file, str, s->sh_size);
+
+        for (t = h, i = 0; i < e->e_shnum; i++)
+        {
+            if (grub_strcmp(str + t->sh_name, ".data") == 0)
+            {
+                offset = t->sh_offset;
+                len = t->sh_size;
+                debug("find .data section at %u %u\n", (grub_uint32_t)offset, len);
+                break;
+            }
+            t = (Elf32_Shdr *)((char *)t + e->e_shentsize);
         }
     }
 
-  grub_free (grub_ventoy_unix_last_chain_buf);
-  grub_ventoy_unix_last_chain_buf = chain;
-  grub_ventoy_unix_last_chain_size = chain_size;
-  grub_ventoy_unix_memfile_env_set ("vtoy_chain_mem", chain,
-                                    (grub_uint64_t) chain_size);
-
-  grub_ventoy_free_chunks (&chunk_list);
-  grub_file_close (file);
-  return GRUB_ERR_NONE;
-}
-
-static grub_err_t
-grub_cmd_vt_vlnk_dump_part (grub_extcmd_context_t ctxt __attribute__ ((unused)),
-                            int argc __attribute__ ((unused)),
-                            char **args __attribute__ ((unused)))
-{
-  int n = 0;
-  struct grub_ventoy_vlnk_part *node;
-
-  for (node = grub_ventoy_vlnk_part_list; node; node = node->next)
+    if (offset == 0 || len == 0)
     {
-      grub_printf ("[%d] %s  disksig:%08x  offset:%llu  fs:%s\n",
-                   ++n,
-                   node->device,
-                   node->diskgig,
-                   (unsigned long long) node->partoffset,
-                   (node->fs ? node->fs->name : "N/A"));
+        debug(".data section not found %s\n", args[0]);
+        goto out;
     }
 
-  return GRUB_ERR_NONE;
-}
+    grub_file_seek(elf->file, offset + len - 8192);
+    grub_file_read(elf->file, data, 8192);
 
-static grub_err_t
-grub_cmd_vt_is_vlnk_name (grub_extcmd_context_t ctxt __attribute__ ((unused)),
-                          int argc, char **args)
-{
-  if (argc == 1 && grub_ventoy_is_vlnk_name (args[0]))
-    return GRUB_ERR_NONE;
-
-  return GRUB_ERR_TEST_FAILURE;
-}
-
-static grub_err_t
-grub_cmd_vt_get_vlnk_dst (grub_extcmd_context_t ctxt __attribute__ ((unused)),
-                          int argc, char **args)
-{
-  char resolved[512];
-
-  if (argc != 2)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT,
-                       "usage: vt_get_vlnk_dst VLNK_FILE VAR");
-
-  grub_env_unset (args[1]);
-
-  if (grub_ventoy_fake_vlnk_src[0] && grub_ventoy_fake_vlnk_dst[0] &&
-      grub_strcmp (args[0], grub_ventoy_fake_vlnk_src) == 0)
+    for (j = 0; j < 8192 - 12; j++)
     {
-      grub_env_set (args[1], grub_ventoy_fake_vlnk_dst);
-      grub_env_export (args[1]);
-      return GRUB_ERR_NONE;
+        if (grub_strncmp(data + j, "@(#)FreeBSD ", 12) == 0)
+        {
+            for (k = j + 12; k < 8192; k++)
+            {
+                if (0 == grub_isdigit(data[k]) && data[k] != '.')
+                {
+                    data[k] = 0;
+                    break;
+                }
+            }
+        
+            grub_snprintf(ver, sizeof(ver), "%s", data + j + 12);
+            break;
+        }
     }
 
-  if (grub_ventoy_vlnk_load_and_resolve (args[0], 0,
-                                         resolved, sizeof (resolved)) == 0)
+    if (ver[0])
     {
-      grub_env_set (args[1], resolved);
-      grub_env_export (args[1]);
-      return GRUB_ERR_NONE;
+        k = (int)grub_strtoul(ver, NULL, 10);
+        debug("freebsd version:<%s> <%d.x>\n", ver, k);
+        grub_snprintf(ver, sizeof(ver), "%d.x", k);
+        ventoy_set_env(args[2], ver);
+    }
+    else
+    {
+        debug("freebsd version:<%s>\n", "NOT FOUND");
     }
 
-  return GRUB_ERR_TEST_FAILURE;
+out:
+    grub_check_free(str);
+    grub_check_free(hdr);
+    grub_check_free(data);
+    check_free(elf, grub_elf_close);
+    
+    VENTOY_CMD_RETURN(GRUB_ERR_NONE);
 }
 
-static grub_err_t
-grub_cmd_vt_vlnk_check (grub_extcmd_context_t ctxt __attribute__ ((unused)),
-                        int argc, char **args)
+grub_err_t ventoy_cmd_unix_replace_grub_conf(grub_extcmd_context_t ctxt, int argc, char **args)
 {
-  char resolved[512];
-
-  if (argc != 1)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT,
-                       "usage: vt_vlnk_check FILE");
-
-  if (!grub_ventoy_is_vlnk_name (args[0]))
+    int len = 0;
+    grub_uint32_t i;
+    char *data;
+    char *pos;
+    const char *val = NULL;
+    grub_uint64_t offset;
+    grub_file_t file;
+    char extcfg[512];
+    const char *confile = NULL;
+    const char * loader_conf[] = 
     {
-      grub_printf ("Invalid vlnk suffix\n");
-      return GRUB_ERR_TEST_FAILURE;
+        "/boot/grub/grub.cfg",
+    };
+
+    (void)ctxt;
+
+    if (argc != 1 && argc != 2)
+    {
+        debug("Replace conf invalid argc %d\n", argc);
+        return 1;
+    }
+ 
+    for (i = 0; i < sizeof(loader_conf) / sizeof(loader_conf[0]); i++)
+    {
+        if (ventoy_get_file_override(loader_conf[i], &offset) == 0)
+        {
+            confile = loader_conf[i];
+            g_conf_override_offset = offset;
+            break;
+        }
     }
 
-  if (grub_ventoy_vlnk_load_and_resolve (args[0], 1,
-                                         resolved, sizeof (resolved)) == 0)
-    return GRUB_ERR_NONE;
+    if (confile == NULL)
+    {   
+        debug("Can't find grub.cfg file from %u locations\n", i);
+        return 1;
+    }
 
-  return GRUB_ERR_TEST_FAILURE;
+    file = ventoy_grub_file_open(GRUB_FILE_TYPE_LINUX_INITRD, "(loop)/%s", confile);
+    if (!file)
+    {
+        debug("Failed to open %s \n", confile);
+        return 1;
+    }
+
+    debug("old grub2 conf file size:%d\n", (int)file->size);
+
+    data = grub_malloc(VTOY_MAX_SCRIPT_BUF);
+    if (!data)
+    {
+        grub_file_close(file);    
+        return 1;
+    }
+
+    grub_file_read(file, data, file->size);
+    grub_file_close(file);
+    
+    g_conf_new_data = data;
+    g_conf_new_len = (int)file->size;
+
+    pos = grub_strstr(data, "kfreebsd /boot/kernel/kernel");
+    if (pos)
+    {
+        pos += grub_strlen("kfreebsd /boot/kernel/kernel");
+        if (grub_strncmp(pos, ".gz", 3) == 0)
+        {
+            pos += 3;
+        }
+
+        if (argc == 2)
+        {
+            vtoy_ssprintf(extcfg, len, ";kfreebsd_module_elf %s; set kFreeBSD.hint.ventoy.0.alias=\"%s\"", args[0], args[1]);
+        }
+        else
+        {
+            vtoy_ssprintf(extcfg, len, ";kfreebsd_module_elf %s", args[0]);
+        }
+
+        if (g_unix_vlnk_boot)
+        {
+            vtoy_ssprintf(extcfg, len, ";set kFreeBSD.hint.ventoy.0.vlnk=%d", 1);
+        }
+
+        val = ventoy_get_env("VTOY_UNIX_REMOUNT");
+        if (val && val[0] == '1' && val[1] == 0)
+        {
+            vtoy_ssprintf(extcfg, len, ";set kFreeBSD.hint.ventoy.0.remount=%d", 1);
+        }
+        
+        grub_memmove(pos + len, pos, (int)(file->size - (pos - data)));
+        grub_memcpy(pos, extcfg, len);
+        g_conf_new_len += len;
+    }
+    else
+    {
+        debug("no kfreebsd found\n");
+    }
+    
+    VENTOY_CMD_RETURN(GRUB_ERR_NONE);
 }
 
-static grub_err_t
-grub_cmd_vt_set_fake_vlnk (grub_extcmd_context_t ctxt __attribute__ ((unused)),
-                           int argc, char **args)
+grub_err_t ventoy_cmd_unix_replace_conf(grub_extcmd_context_t ctxt, int argc, char **args)
 {
-  if (argc != 3)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT,
-                       "usage: vt_set_fake_vlnk SRC DST SIZE");
+    grub_uint32_t i;
+    char *data;
+    grub_uint64_t offset;
+    grub_file_t file;
+    const char *confile = NULL;
+    const char * loader_conf[] = 
+    {
+        "/boot/loader.conf",
+        "/boot/defaults/loader.conf",
+    };
 
-  grub_snprintf (grub_ventoy_fake_vlnk_src,
-                 sizeof (grub_ventoy_fake_vlnk_src), "%s", args[0]);
-  grub_snprintf (grub_ventoy_fake_vlnk_dst,
-                 sizeof (grub_ventoy_fake_vlnk_dst), "%s", args[1]);
-  grub_ventoy_fake_vlnk_size = grub_strtoull (args[2], 0, 10);
-  return GRUB_ERR_NONE;
+    (void)ctxt;
+
+    if (argc != 2 && argc != 3)
+    {
+        debug("Replace conf invalid argc %d\n", argc);
+        return 1;
+    }
+ 
+    for (i = 0; i < sizeof(loader_conf) / sizeof(loader_conf[0]); i++)
+    {
+        if (ventoy_get_file_override(loader_conf[i], &offset) == 0)
+        {
+            confile = loader_conf[i];
+            g_conf_override_offset = offset;
+            break;
+        }
+    }
+
+    if (confile == NULL)
+    {   
+        debug("Can't find loader.conf file from %u locations\n", i);
+        return 1;
+    }
+
+    file = ventoy_grub_file_open(GRUB_FILE_TYPE_LINUX_INITRD, "(loop)/%s", confile);
+    if (!file)
+    {
+        debug("Failed to open %s \n", confile);
+        return 1;
+    }
+
+    debug("old conf file <%s> size:%d\n", confile, (int)file->size);
+
+    data = grub_malloc(VTOY_MAX_SCRIPT_BUF);
+    if (!data)
+    {
+        grub_file_close(file);    
+        return 1;
+    }
+
+    grub_file_read(file, data, file->size);
+    grub_file_close(file);
+    
+    g_conf_new_data = data;
+    g_conf_new_len = (int)file->size;
+
+    if (grub_strcmp(args[0], "FreeBSD") == 0)
+    {
+        g_conf_new_len += ventoy_freebsd_append_conf(data + file->size, args[1], (argc > 2) ? args[2] : NULL);
+    }
+    else if (grub_strcmp(args[0], "DragonFly") == 0)
+    {
+        g_conf_new_len += ventoy_dragonfly_append_conf(data + file->size, args[1]);
+    }
+    
+    VENTOY_CMD_RETURN(GRUB_ERR_NONE);
 }
 
-static grub_err_t
-grub_cmd_vt_reset_fake_vlnk (grub_extcmd_context_t ctxt __attribute__ ((unused)),
-                             int argc __attribute__ ((unused)),
-                             char **args __attribute__ ((unused)))
+static int ventoy_unix_search_magic(char *data, int len)
 {
-  grub_ventoy_unix_reset_fake_vlnk ();
-  return GRUB_ERR_NONE;
+    int i;
+    grub_uint32_t *magic = NULL;    
+
+    for (i = 0; i < len; i += 4096)
+    {
+        magic = (grub_uint32_t *)(data + i);
+        if (magic[0] == VENTOY_UNIX_SEG_MAGIC0 && magic[1] == VENTOY_UNIX_SEG_MAGIC1 && 
+            magic[2] == VENTOY_UNIX_SEG_MAGIC2 && magic[3] == VENTOY_UNIX_SEG_MAGIC3)
+        {
+            debug("unix find search magic at 0x%x loop:%d\n", i, (i >> 12));
+            g_mod_search_magic = i;
+            return 0;
+        }
+    }
+
+    debug("unix can not find search magic\n");
+    return 1;
 }
 
-static void
-grub_ventoy_unix_init (void)
+grub_err_t ventoy_cmd_unix_replace_ko(grub_extcmd_context_t ctxt, int argc, char **args)
 {
+    char *data;
+    grub_uint64_t offset;
+    grub_file_t file;
+
+    (void)ctxt;
+
+    if (argc != 2)
+    {
+        debug("Replace ko invalid argc %d\n", argc);
+        return 1;
+    }
+
+    debug("replace ko %s\n", args[0]);
+
+    if (ventoy_get_file_override(args[0], &offset) == 0)
+    {
+        grub_snprintf(g_ko_mod_path, sizeof(g_ko_mod_path), "%s", args[0]);
+        g_mod_override_offset = offset;
+    }
+    else
+    {   
+        debug("Can't find replace ko file from %s\n", args[0]);
+        return 1;
+    }
+
+    file = ventoy_grub_file_open(GRUB_FILE_TYPE_LINUX_INITRD, "%s", args[1]);
+    if (!file)
+    {
+        debug("Failed to open %s \n", args[1]);
+        return 1;
+    }
+
+    debug("new ko file size:%d\n", (int)file->size);
+
+    data = grub_malloc(file->size);
+    if (!data)
+    {
+        debug("Failed to alloc memory for new ko %d\n", (int)file->size);
+        grub_file_close(file);    
+        return 1;
+    }
+
+    grub_file_read(file, data, file->size);
+    grub_file_close(file);
+    
+    g_mod_new_data = data;
+    g_mod_new_len = (int)file->size;
+
+    ventoy_unix_search_magic(g_mod_new_data, g_mod_new_len);
+    
+    VENTOY_CMD_RETURN(GRUB_ERR_NONE);
 }
 
-static void
-grub_ventoy_unix_fini (void)
+grub_err_t ventoy_cmd_unix_ko_fillmap(grub_extcmd_context_t ctxt, int argc, char **args)
 {
-  grub_ventoy_unix_reset_state ();
-  grub_ventoy_unix_reset_fake_vlnk ();
-  grub_ventoy_unix_free_vlnk_parts ();
+    int i;
+    grub_file_t file;
+    grub_uint32_t magic[4];
+    grub_uint32_t len;
 
-  grub_free (grub_ventoy_unix_last_chain_buf);
-  grub_ventoy_unix_last_chain_buf = 0;
-  grub_ventoy_unix_last_chain_size = 0;
+    (void)ctxt;
+
+    if (argc != 1)
+    {
+        debug("Fillmap ko invalid argc %d\n", argc);
+        return 1;
+    }
+
+    debug("Fillmap ko %s\n", args[0]);
+
+    file = ventoy_grub_file_open(VENTOY_FILE_TYPE, "(loop)%s", args[0]);
+    if (file)
+    {
+        grub_file_read(file, magic, 4); /* read for trigger */
+        g_mod_override_offset = grub_iso9660_get_last_read_pos(file);
+    }
+    else
+    {   
+        debug("Can't find replace ko file from %s\n", args[0]);
+        return 1;
+    }
+
+    for (i = 0; i < (int)(file->size); i += 65536)
+    {
+        magic[0] = 0;
+        grub_file_seek(file, i);
+        grub_file_read(file, magic, sizeof(magic));
+    
+        if (magic[0] == VENTOY_UNIX_SEG_MAGIC0 && magic[1] == VENTOY_UNIX_SEG_MAGIC1 && 
+            magic[2] == VENTOY_UNIX_SEG_MAGIC2 && magic[3] == VENTOY_UNIX_SEG_MAGIC3)
+        {
+            debug("unix find search magic at 0x%x loop:%d\n", i, (i >> 16));
+            g_mod_override_offset += i;
+            break;
+        }
+    }
+
+    len = (grub_uint32_t)OFFSET_OF(struct g_ventoy_map, seglist) + 
+        (sizeof(struct g_ventoy_seg) * g_img_chunk_list.cur_chunk);
+
+    g_ko_fillmap_len = (int)len;
+    g_ko_fillmap_data = grub_malloc(len);
+    if (!g_ko_fillmap_data)
+    {
+        g_ko_fillmap_len = 0;
+        debug("Failed to malloc fillmap data\n");
+    }
+
+    debug("Fillmap ko segnum:%u, override len:%u data:%p\n", g_img_chunk_list.cur_chunk, len, g_ko_fillmap_data);
+
+    grub_file_close(file);
+    VENTOY_CMD_RETURN(GRUB_ERR_NONE);
+}
+
+grub_err_t ventoy_cmd_unix_fill_image_desc(grub_extcmd_context_t ctxt, int argc, char **args)
+{
+    int i;
+    grub_uint8_t *byte;
+    grub_uint32_t memsize;
+    ventoy_image_desc *desc;
+    grub_uint8_t flag[32] = {
+        0xFF, 0xEE, 0xDD, 0xCC, 0xBB, 0xAA, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00,
+        0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF
+    };
+
+    (void)ctxt;
+    (void)argc;
+    (void)args;
+
+    debug("ventoy_cmd_unix_fill_image_desc %p\n", g_mod_new_data);
+
+    if (!g_mod_new_data)
+    {
+        goto end;
+    }
+
+    byte = (grub_uint8_t *)g_mod_new_data;
+    for (i = 0; i < g_mod_new_len - 32; i += 16)
+    {
+        if (byte[i] == 0xFF && byte[i + 1] == 0xEE)
+        {
+            if (grub_memcmp(flag, byte + i, 32) == 0)
+            {
+                debug("Find position flag at %d(0x%x)\n", i, i);
+                break;                
+            }
+        }
+    }
+
+    if (i >= g_mod_new_len - 32)
+    {
+        debug("Failed to find position flag %d\n", i);
+        goto end;
+    }
+
+    desc = (ventoy_image_desc *)(byte + i);
+    desc->disk_size = g_ventoy_disk_size;
+    desc->part1_size = g_ventoy_disk_part_size[0];
+    grub_memcpy(desc->disk_uuid, g_ventoy_part_info->MBR.BootCode + 0x180, 16);
+    grub_memcpy(desc->disk_signature, g_ventoy_part_info->MBR.BootCode + 0x1B8, 4);
+
+    desc->img_chunk_count = g_img_chunk_list.cur_chunk;
+    memsize = g_img_chunk_list.cur_chunk * sizeof(ventoy_img_chunk);
+
+    debug("image chunk count:%u  memsize:%u\n", desc->img_chunk_count, memsize);
+
+    if (memsize >= VTOY_SIZE_1MB * 8)
+    {
+        grub_printf("image chunk count:%u  memsize:%u too big\n", desc->img_chunk_count, memsize);
+        goto end;
+    }
+
+    grub_memcpy(desc + 1, g_img_chunk_list.chunk, memsize);
+
+end:
+    VENTOY_CMD_RETURN(GRUB_ERR_NONE);
+}
+
+grub_err_t ventoy_cmd_unix_gzip_newko(grub_extcmd_context_t ctxt, int argc, char **args)
+{
+    int newlen;
+    grub_uint8_t *buf;
+
+    (void)ctxt;
+    (void)argc;
+    (void)args;
+
+    debug("ventoy_cmd_unix_gzip_newko %p\n", g_mod_new_data);
+
+    if (!g_mod_new_data)
+    {
+        goto end;
+    }
+
+    buf = grub_malloc(g_mod_new_len);
+    if (!buf)
+    {
+        goto end;
+    }
+
+    newlen = ventoy_gzip_compress(g_mod_new_data, g_mod_new_len, buf, g_mod_new_len);
+
+    grub_free(g_mod_new_data);
+
+    debug("gzip org len:%d  newlen:%d\n", g_mod_new_len, newlen);
+
+    g_mod_new_data = (char *)buf;
+    g_mod_new_len = newlen;
+
+end:
+    VENTOY_CMD_RETURN(GRUB_ERR_NONE);
+}
+
+grub_err_t ventoy_cmd_unix_chain_data(grub_extcmd_context_t ctxt, int argc, char **args)
+{
+    int ventoy_compatible = 0;
+    grub_uint32_t size = 0;
+    grub_uint64_t isosize = 0;
+    grub_uint32_t boot_catlog = 0;
+    grub_uint32_t img_chunk_size = 0;
+    grub_uint32_t override_count = 0;
+    grub_uint32_t override_size = 0;
+    grub_uint32_t virt_chunk_size = 0;
+    grub_file_t file;
+    grub_disk_t disk;
+    const char *pLastChain = NULL;
+    const char *compatible;
+    ventoy_chain_head *chain;
+    
+    (void)ctxt;
+    (void)argc;
+
+    compatible = grub_env_get("ventoy_compatible");
+    if (compatible && compatible[0] == 'Y')
+    {
+        ventoy_compatible = 1;
+    }
+
+    if (NULL == g_img_chunk_list.chunk)
+    {
+        grub_printf("ventoy not ready\n");
+        return 1;
+    }
+
+    file = ventoy_grub_file_open(VENTOY_FILE_TYPE, "%s", args[0]);
+    if (!file)
+    {
+        return 1;
+    }
+
+    isosize = file->size;
+
+    boot_catlog = ventoy_get_iso_boot_catlog(file);
+    if (boot_catlog)
+    {
+        if (ventoy_is_efi_os() && (!ventoy_has_efi_eltorito(file, boot_catlog)))
+        {
+            grub_env_set("LoadIsoEfiDriver", "on");
+        }
+    }
+    else
+    {
+        if (ventoy_is_efi_os())
+        {
+            grub_env_set("LoadIsoEfiDriver", "on");
+        }
+        else
+        {
+            return grub_error(GRUB_ERR_BAD_ARGUMENT, "File %s is not bootable", args[0]);
+        }
+    }
+    
+    img_chunk_size = g_img_chunk_list.cur_chunk * sizeof(ventoy_img_chunk);
+    
+    if (ventoy_compatible)
+    {
+        size = sizeof(ventoy_chain_head) + img_chunk_size;
+    }
+    else
+    {
+        override_count = ventoy_unix_get_override_chunk_count();
+        override_size = override_count * sizeof(ventoy_override_chunk);
+        
+        virt_chunk_size = ventoy_unix_get_virt_chunk_size();
+        size = sizeof(ventoy_chain_head) + img_chunk_size + override_size + virt_chunk_size;
+    }
+    
+    pLastChain = grub_env_get("vtoy_chain_mem_addr");
+    if (pLastChain)
+    {
+        chain = (ventoy_chain_head *)grub_strtoul(pLastChain, NULL, 16);
+        if (chain)
+        {
+            debug("free last chain memory %p\n", chain);
+            grub_free(chain);
+        }
+    }
+
+    chain = ventoy_alloc_chain(size);
+    if (!chain)
+    {
+        grub_printf("Failed to alloc chain unix memory size %u\n", size);
+        grub_file_close(file);
+        return 1;
+    }
+
+    ventoy_memfile_env_set("vtoy_chain_mem", chain, (ulonglong)size);
+
+    grub_memset(chain, 0, sizeof(ventoy_chain_head));
+
+    /* part 1: os parameter */
+    g_ventoy_chain_type = ventoy_chain_linux;
+    ventoy_fill_os_param(file, &(chain->os_param));
+
+    /* part 2: chain head */
+    disk = file->device->disk;
+    chain->disk_drive = disk->id;
+    chain->disk_sector_size = (1 << disk->log_sector_size);
+    chain->real_img_size_in_bytes = file->size;
+    chain->virt_img_size_in_bytes = (file->size + 2047) / 2048 * 2048;
+    chain->boot_catalog = boot_catlog;
+
+    if (!ventoy_is_efi_os())
+    {
+        grub_file_seek(file, boot_catlog * 2048);
+        grub_file_read(file, chain->boot_catalog_sector, sizeof(chain->boot_catalog_sector));
+    }
+
+    /* part 3: image chunk */
+    chain->img_chunk_offset = sizeof(ventoy_chain_head);
+    chain->img_chunk_num = g_img_chunk_list.cur_chunk;
+    grub_memcpy((char *)chain + chain->img_chunk_offset, g_img_chunk_list.chunk, img_chunk_size);
+
+    if (ventoy_compatible)
+    {
+        return 0;
+    }
+
+    /* part 4: override chunk */
+    chain->override_chunk_offset = chain->img_chunk_offset + img_chunk_size;
+    chain->override_chunk_num = override_count;
+    ventoy_unix_fill_override_data(isosize, chain);
+
+    /* part 5: virt chunk */
+    chain->virt_chunk_offset = chain->override_chunk_offset + override_size;
+    chain->virt_chunk_num = ventoy_unix_get_virt_chunk_count();
+    ventoy_unix_fill_virt_data(isosize, chain);
+
+    grub_file_close(file);
+    
+    VENTOY_CMD_RETURN(GRUB_ERR_NONE);
 }
