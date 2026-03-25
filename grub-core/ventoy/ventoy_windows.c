@@ -37,6 +37,7 @@
 #include <grub/crypto.h>
 #include <grub/ventoy.h>
 #include "ventoy_def.h"
+#include "ventoy_compat.h"
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
@@ -2753,56 +2754,28 @@ grub_err_t ventoy_cmd_wim_chain_data(grub_extcmd_context_t ctxt, int argc, char 
     return ret;
 }
 
-static cmd_para ventoy_windows_cmds[] =
+int ventoy_chain_file_size(const char *path)
 {
-    { "vt_windows_reset", ventoy_cmd_wimdows_reset, 0, NULL, "", "", NULL },
-    { "vt_windows_chain_data", ventoy_cmd_windows_chain_data, 0, NULL, "", "", NULL },
-    { "vt_windows_wimboot_data", ventoy_cmd_windows_wimboot_data, 0, NULL, "", "", NULL },
-    { "vt_windows_collect_wim_patch", ventoy_cmd_collect_wim_patch, 0, NULL, "", "", NULL },
-    { "vt_windows_locate_wim_patch", ventoy_cmd_locate_wim_patch, 0, NULL, "", "", NULL },
-    { "vt_windows_count_wim_patch", ventoy_cmd_wim_patch_count, 0, NULL, "", "", NULL },
-    { "vt_dump_wim_patch", ventoy_cmd_dump_wim_patch, 0, NULL, "", "", NULL },
-    { "vt_wim_check_bootable", ventoy_cmd_wim_check_bootable, 0, NULL, "", "", NULL },
-    { "vt_wim_chain_data", ventoy_cmd_wim_chain_data, 0, NULL, "", "", NULL },
-    { "vt_is_pe64", ventoy_cmd_is_pe64, 0, NULL, "", "", NULL },
-    { "vt_sel_wimboot", ventoy_cmd_sel_wimboot, 0, NULL, "", "", NULL },
-    { "vt_is_standard_winiso", ventoy_cmd_is_standard_winiso, 0, NULL, "", "", NULL },
-    { "vt_sel_winpe_wim", ventoy_cmd_sel_winpe_wim, 0, NULL, "", "", NULL },
-};
+    int size;
+    grub_file_t file;
 
-static void ventoy_register_windows_cmds(void)
-{
-    grub_uint32_t i;
-    cmd_para *cur;
+    file = grub_file_open(path, VENTOY_FILE_TYPE);
+    size = (int)(file->size);
 
-    for (i = 0; i < ARRAY_SIZE(ventoy_windows_cmds); i++)
-    {
-        cur = ventoy_windows_cmds + i;
-        cur->cmd = grub_register_extcmd(cur->name, cur->func, cur->flags,
-                                        cur->summary, cur->description, cur->parser);
-    }
+    grub_file_close(file);
+    
+    return size;
 }
 
-static void ventoy_unregister_windows_cmds(void)
+int ventoy_chain_file_read(const char *path, int offset, int len, void *buf)
 {
-    grub_uint32_t i;
+    int size;
+    grub_file_t file;
 
-    for (i = 0; i < ARRAY_SIZE(ventoy_windows_cmds); i++)
-    {
-        if (ventoy_windows_cmds[i].cmd)
-        {
-            grub_unregister_extcmd(ventoy_windows_cmds[i].cmd);
-            ventoy_windows_cmds[i].cmd = NULL;
-        }
-    }
-}
-
-GRUB_MOD_INIT(ventoywindows)
-{
-    ventoy_register_windows_cmds();
-}
-
-GRUB_MOD_FINI(ventoywindows)
-{
-    ventoy_unregister_windows_cmds();
+    file = grub_file_open(path, VENTOY_FILE_TYPE);
+    grub_file_seek(file, offset);
+    size = grub_file_read(file, buf, len);
+    grub_file_close(file);
+    
+    return size;
 }

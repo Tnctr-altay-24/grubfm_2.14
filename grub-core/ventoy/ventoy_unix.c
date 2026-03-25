@@ -37,6 +37,7 @@
 #include <grub/elfload.h>
 #include <grub/ventoy.h>
 #include "ventoy_def.h"
+#include "ventoy_compat.h"
 
 GRUB_MOD_LICENSE ("GPLv3+");
 

@@ -1177,10 +1177,15 @@ int ventoy_need_prompt_load_file(void)
 
 grub_ssize_t ventoy_load_file_with_prompt(grub_file_t file, void *buf, grub_ssize_t size)
 {
-    grub_uint64_t ro = 0;
-    grub_uint64_t div = 0;
+    grub_uint64_t acc = 0;
+    grub_uint32_t pct = 1;
     grub_ssize_t left = size;
     char *cur = (char *)buf;
+
+    if (size <= 0)
+    {
+        return 0;
+    }
 
     grub_printf("\r%s   1%%    ", g_vtoy_prompt_msg); 
     grub_refresh();
@@ -1191,12 +1196,13 @@ grub_ssize_t ventoy_load_file_with_prompt(grub_file_t file, void *buf, grub_ssiz
         cur += VTOY_SIZE_2MB;
         left -= VTOY_SIZE_2MB;
 
-        div = grub_divmod64((grub_uint64_t)((size - left) * 100), (grub_uint64_t)size, &ro);
-        if (div < 1)
+        acc += ((grub_uint64_t)VTOY_SIZE_2MB) * 100;
+        while (acc >= (grub_uint64_t)size && pct < 100)
         {
-            div = 1;
+            acc -= (grub_uint64_t)size;
+            pct++;
         }
-        grub_printf("\r%s   %d%%    ", g_vtoy_prompt_msg, (int)div);
+        grub_printf("\r%s   %d%%    ", g_vtoy_prompt_msg, (int)pct);
         grub_refresh();  
     }
 
@@ -2658,7 +2664,7 @@ static grub_err_t ventoy_cmd_img_name(grub_extcmd_context_t ctxt, int argc, char
     img_id = grub_strtol(args[0], NULL, 10);
     if (img_id >= g_ventoy_img_count)
     {
-        return grub_error(GRUB_ERR_BAD_ARGUMENT, "No such many images %ld %d", img_id, g_ventoy_img_count);
+        return grub_error(GRUB_ERR_BAD_ARGUMENT, "No such many images %ld %ld", img_id, (long)g_ventoy_img_count);
     }
 
     debug("Find image %ld name \n", img_id);
@@ -4698,22 +4704,15 @@ static grub_err_t ventoy_cmd_img_unhook_root(grub_extcmd_context_t ctxt, int arg
 static grub_err_t ventoy_cmd_check_secureboot_var(grub_extcmd_context_t ctxt, int argc, char **args)
 {
     int ret = 1;
-    grub_uint8_t *var = NULL;
-    grub_size_t size = 0;
-    grub_guid_t global = GRUB_EFI_GLOBAL_VARIABLE_GUID;
-    grub_efi_status_t status;
 
     (void)ctxt;
     (void)argc;
     (void)args;
 
-    status = grub_efi_get_variable("SecureBoot", &global, &size, (void **)&var);
-    if (status == GRUB_EFI_SUCCESS && var && size > 0 && *var == 1)
+    if (ventoy_compat_efi_secureboot_enabled())
     {
-        grub_free(var);
         return 0;
     }
-    grub_free(var);
     
     return ret;
 }
@@ -5914,6 +5913,7 @@ static grub_err_t grub_cmd_gptpriority(grub_extcmd_context_t ctxt, int argc, cha
 static grub_err_t grub_cmd_syslinux_nojoliet(grub_extcmd_context_t ctxt, int argc, char **args)
 {
     int ret = 1;
+    int joliet = 0;
     grub_file_t file = NULL;
     grub_uint32_t loadrba = 0;
     grub_uint32_t boot_catlog = 0;
@@ -5927,6 +5927,12 @@ static grub_err_t grub_cmd_syslinux_nojoliet(grub_extcmd_context_t ctxt, int arg
     if (ventoy_check_file_exist("(loop)/isolinux/isolinux.cfg"))
     {
         return 0;
+    }
+
+    joliet = ventoy_compat_iso9660_is_joliet();
+    if (joliet == 0)
+    {
+        return 1;
     }
 
     file = grub_file_open(args[0], VENTOY_FILE_TYPE);
@@ -6052,7 +6058,7 @@ static grub_err_t grub_cmd_check_vlnk(grub_extcmd_context_t ctxt, int argc, char
         goto out;
     }
 
-    file = grub_file_open(args[0], VENTOY_FILE_TYPE);
+    file = grub_file_open(args[0], VENTOY_FILE_TYPE | GRUB_FILE_TYPE_NO_VLNK);
     if (!file)
     {
         grub_printf("Failed to open %s\n", args[0]);
@@ -6812,32 +6818,6 @@ static const char * ventoy_menu_lang_read_hook(struct grub_env_var *var, const c
     return ventoy_get_vmenu_title(val);
 }
 
-int ventoy_chain_file_size(const char *path)
-{
-    int size;
-    grub_file_t file;
-
-    file = grub_file_open(path, VENTOY_FILE_TYPE);
-    size = (int)(file->size);
-
-    grub_file_close(file);
-
-    return size;
-}
-
-int ventoy_chain_file_read(const char *path, int offset, int len, void *buf)
-{
-    int size;
-    grub_file_t file;
-
-    file = grub_file_open(path, VENTOY_FILE_TYPE);
-    grub_file_seek(file, offset);
-    size = grub_file_read(file, buf, len);
-    grub_file_close(file);
-
-    return size;
-}
-
 int ventoy_env_init(void)
 {
     int i;
@@ -6927,6 +6907,10 @@ static cmd_para ventoy_cmds[] =
     { "vt_check_custom_boot", ventoy_cmd_check_custom_boot, 0, NULL, "", "", NULL },
     { "vt_dump_custom_boot", ventoy_cmd_dump_custom_boot, 0, NULL, "", "", NULL },
 
+    { "vt_skip_svd", ventoy_cmd_skip_svd, 0, NULL, "", "", NULL },
+    { "vt_cpio_busybox64", ventoy_cmd_cpio_busybox_64, 0, NULL, "", "", NULL },
+    { "vt_load_cpio", ventoy_cmd_load_cpio, 0, NULL, "", "", NULL },
+    { "vt_trailer_cpio", ventoy_cmd_trailer_cpio, 0, NULL, "", "", NULL },
     { "vt_push_last_entry", ventoy_cmd_push_last_entry, 0, NULL, "", "", NULL },
     { "vt_pop_last_entry", ventoy_cmd_pop_last_entry, 0, NULL, "", "", NULL },
     { "vt_get_lib_module_ver", ventoy_cmd_lib_module_ver, 0, NULL, "", "", NULL },
@@ -6962,6 +6946,27 @@ static cmd_para ventoy_cmds[] =
     { "vt_load_file_to_mem", ventoy_cmd_load_file_to_mem, 0, NULL, "", "", NULL },
     { "vt_load_img_memdisk", ventoy_cmd_load_img_memdisk, 0, NULL, "", "", NULL },
     { "vt_concat_efi_iso", ventoy_cmd_concat_efi_iso, 0, NULL, "", "", NULL },
+
+    { "vt_linux_parse_initrd_isolinux", ventoy_cmd_isolinux_initrd_collect, 0, NULL, "{cfgfile}", "", NULL },
+    { "vt_linux_parse_initrd_grub", ventoy_cmd_grub_initrd_collect, 0, NULL, "{cfgfile}", "", NULL },
+    { "vt_linux_specify_initrd_file", ventoy_cmd_specify_initrd_file, 0, NULL, "", "", NULL },
+    { "vt_linux_clear_initrd", ventoy_cmd_clear_initrd_list, 0, NULL, "", "", NULL },
+    { "vt_linux_dump_initrd", ventoy_cmd_dump_initrd_list, 0, NULL, "", "", NULL },
+    { "vt_linux_initrd_count", ventoy_cmd_initrd_count, 0, NULL, "", "", NULL },
+    { "vt_linux_valid_initrd_count", ventoy_cmd_valid_initrd_count, 0, NULL, "", "", NULL },
+    { "vt_linux_locate_initrd", ventoy_cmd_linux_locate_initrd, 0, NULL, "", "", NULL },
+    { "vt_linux_chain_data", ventoy_cmd_linux_chain_data, 0, NULL, "", "", NULL },
+    { "vt_linux_get_main_initrd_index", ventoy_cmd_linux_get_main_initrd_index, 0, NULL, "", "", NULL },
+
+    { "vt_windows_reset",      ventoy_cmd_wimdows_reset, 0, NULL, "", "", NULL },
+    { "vt_windows_chain_data", ventoy_cmd_windows_chain_data, 0, NULL, "", "", NULL },
+    { "vt_windows_wimboot_data", ventoy_cmd_windows_wimboot_data, 0, NULL, "", "", NULL },
+    { "vt_windows_collect_wim_patch", ventoy_cmd_collect_wim_patch, 0, NULL, "", "", NULL },
+    { "vt_windows_locate_wim_patch", ventoy_cmd_locate_wim_patch, 0, NULL, "", "", NULL },
+    { "vt_windows_count_wim_patch", ventoy_cmd_wim_patch_count, 0, NULL, "", "", NULL },
+    { "vt_dump_wim_patch", ventoy_cmd_dump_wim_patch, 0, NULL, "", "", NULL },
+    { "vt_wim_check_bootable", ventoy_cmd_wim_check_bootable, 0, NULL, "", "", NULL },
+    { "vt_wim_chain_data", ventoy_cmd_wim_chain_data, 0, NULL, "", "", NULL },
     
     { "vt_add_replace_file", ventoy_cmd_add_replace_file, 0, NULL, "", "", NULL },
     { "vt_get_replace_file_cnt", ventoy_cmd_get_replace_file_cnt, 0, NULL, "", "", NULL },
@@ -6980,12 +6985,27 @@ static cmd_para ventoy_cmds[] =
     
     { "vt_parse_iso_volume", ventoy_cmd_parse_volume, 0, NULL, "", "", NULL },
     { "vt_parse_iso_create_date", ventoy_cmd_parse_create_date, 0, NULL, "", "", NULL },
+    { "vt_parse_freenas_ver", ventoy_cmd_parse_freenas_ver, 0, NULL, "", "", NULL },
+    { "vt_unix_parse_freebsd_ver", ventoy_cmd_unix_freebsd_ver, 0, NULL, "", "", NULL },
+    { "vt_unix_parse_freebsd_ver_elf", ventoy_cmd_unix_freebsd_ver_elf, 0, NULL, "", "", NULL },
+    { "vt_unix_reset", ventoy_cmd_unix_reset, 0, NULL, "", "", NULL },
+    { "vt_unix_check_vlnk", ventoy_cmd_unix_check_vlnk, 0, NULL, "", "", NULL },
+    { "vt_unix_replace_conf", ventoy_cmd_unix_replace_conf, 0, NULL, "", "", NULL },
+    { "vt_unix_replace_grub_conf", ventoy_cmd_unix_replace_grub_conf, 0, NULL, "", "", NULL },
+    { "vt_unix_replace_ko", ventoy_cmd_unix_replace_ko, 0, NULL, "", "", NULL },
+    { "vt_unix_ko_fillmap", ventoy_cmd_unix_ko_fillmap, 0, NULL, "", "", NULL },
+    { "vt_unix_fill_image_desc", ventoy_cmd_unix_fill_image_desc, 0, NULL, "", "", NULL },
+    { "vt_unix_gzip_new_ko", ventoy_cmd_unix_gzip_newko, 0, NULL, "", "", NULL },
+    { "vt_unix_chain_data", ventoy_cmd_unix_chain_data, 0, NULL, "", "", NULL },
+
     { "vt_img_hook_root", ventoy_cmd_img_hook_root, 0, NULL, "", "", NULL },
     { "vt_img_unhook_root", ventoy_cmd_img_unhook_root, 0, NULL, "", "", NULL },
     { "vt_acpi_param", ventoy_cmd_acpi_param, 0, NULL, "", "", NULL },
     { "vt_check_secureboot_var", ventoy_cmd_check_secureboot_var, 0, NULL, "", "", NULL },
     { "vt_clear_key", ventoy_cmd_clear_key, 0, NULL, "", "", NULL },
     { "vt_img_check_range", ventoy_cmd_img_check_range, 0, NULL, "", "", NULL },
+    { "vt_is_pe64", ventoy_cmd_is_pe64, 0, NULL, "", "", NULL },
+    { "vt_sel_wimboot", ventoy_cmd_sel_wimboot, 0, NULL, "", "", NULL },
     { "vt_set_wim_load_prompt", ventoy_cmd_set_wim_prompt, 0, NULL, "", "", NULL },
     { "vt_set_theme", ventoy_cmd_set_theme, 0, NULL, "", "", NULL },
     { "vt_set_theme_path", ventoy_cmd_set_theme_path, 0, NULL, "", "", NULL },
@@ -6996,6 +7016,7 @@ static cmd_para ventoy_cmds[] =
     { "vt_push_pager", ventoy_cmd_push_pager, 0, NULL, "", "", NULL },
     { "vt_pop_pager", ventoy_cmd_pop_pager, 0, NULL, "", "", NULL },
     { "vt_check_json_path_case", ventoy_cmd_chk_json_pathcase, 0, NULL, "", "", NULL },
+    { "vt_append_extra_sector", ventoy_cmd_append_ext_sector, 0, NULL, "", "", NULL },
     { "gptpriority", grub_cmd_gptpriority, 0, NULL, "", "", NULL },
     { "vt_syslinux_need_nojoliet", grub_cmd_syslinux_nojoliet, 0, NULL, "", "", NULL },
     { "vt_vlnk_check", grub_cmd_check_vlnk, 0, NULL, "", "", NULL },
@@ -7009,9 +7030,13 @@ static cmd_para ventoy_cmds[] =
     { "vt_iso_vd_id_begin", ventoy_cmd_iso_vd_id_begin, 0, NULL, "", "", NULL },
     { "vt_fn_mutex_lock", ventoy_cmd_fn_mutex_lock, 0, NULL, "", "", NULL },
     { "vt_efi_dump_rsv_page", ventoy_cmd_dump_rsv_page, 0, NULL, "", "", NULL },
+    { "vt_is_standard_winiso", ventoy_cmd_is_standard_winiso, 0, NULL, "", "", NULL },
+    { "vt_sel_winpe_wim", ventoy_cmd_sel_winpe_wim, 0, NULL, "", "", NULL },
     { "vt_need_secondary_menu", ventoy_cmd_need_secondary_menu, 0, NULL, "", "", NULL },
     { "vt_show_secondary_menu", ventoy_cmd_show_secondary_menu, 0, NULL, "", "", NULL },
     { "vt_fs_ignore_case", ventoy_cmd_fs_ignore_case, 0, NULL, "", "", NULL },
+    { "vt_systemd_menu", ventoy_cmd_linux_systemd_menu, 0, NULL, "", "", NULL },
+    { "vt_limine_menu", ventoy_cmd_linux_limine_menu, 0, NULL, "", "", NULL },
     { "vt_secondary_recover_mode", ventoy_cmd_secondary_recover_mode, 0, NULL, "", "", NULL },
     { "vt_load_menu_lang", ventoy_cmd_load_menu_lang, 0, NULL, "", "", NULL },
     { "vt_init_menu_lang", ventoy_cmd_init_menu_lang, 0, NULL, "", "", NULL },
@@ -7020,6 +7045,8 @@ static cmd_para ventoy_cmds[] =
     { "vt_cmp_checksum", ventoy_cmd_cmp_checksum, 0, NULL, "", "", NULL },
     { "vt_push_menu_lang", ventoy_cmd_push_menulang, 0, NULL, "", "", NULL },
     { "vt_pop_menu_lang", ventoy_cmd_pop_menulang, 0, NULL, "", "", NULL },
+    { "vt_linux_initrd", ventoy_cmd_linux_initrd, 0, NULL, "", "", NULL },
+
 };
 
 int ventoy_register_all_cmd(void)

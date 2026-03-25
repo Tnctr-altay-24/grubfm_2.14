@@ -14,6 +14,7 @@
 #include "ventoy_wim.h"
 #include "ventoy_wimtools.h"
 #include "ventoy_def.h"
+#include "ventoy_compat.h"
 
 static wchar_t *
 ventoy_mbstowcs_simple (const char *path)
@@ -238,13 +239,13 @@ ventoy_wim_find_lookup_entry (struct ventoy_wim_header *header,
                               struct wim_hash *hash)
 {
   grub_uint32_t i;
-  grub_uint32_t count;
+  grub_uint64_t left;
 
   if (!header || !lookup || !hash)
     return 0;
 
-  count = (grub_uint32_t) (header->lookup.len / sizeof (*lookup));
-  for (i = 0; i < count; i++)
+  left = header->lookup.len;
+  for (i = 0; left >= sizeof (*lookup); i++, left -= sizeof (*lookup))
     if (grub_memcmp (&lookup[i].hash, hash, sizeof (*hash)) == 0)
       return lookup + i;
 

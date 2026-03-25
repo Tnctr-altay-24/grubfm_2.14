@@ -38,6 +38,7 @@
 #include <grub/video.h>
 #include <grub/ventoy.h>
 #include "ventoy_def.h"
+#include "ventoy_compat.h"
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
@@ -3480,15 +3481,15 @@ grub_err_t ventoy_cmd_set_theme(grub_extcmd_context_t ctxt, int argc, char **arg
 
         if (g_theme_random == vtoy_theme_random_boot_second)
         {
-            grub_divmod32((grub_uint32_t)datetime.second, theme_num, &mod);
+            mod = (grub_uint32_t)datetime.second % theme_num;
         }
         else if (g_theme_random == vtoy_theme_random_boot_day)
         {
-            grub_divmod32((grub_uint32_t)datetime.day, theme_num, &mod);
+            mod = (grub_uint32_t)datetime.day % theme_num;
         }
         else if (g_theme_random == vtoy_theme_random_boot_month)
         {
-            grub_divmod32((grub_uint32_t)datetime.month, theme_num, &mod);
+            mod = (grub_uint32_t)datetime.month % theme_num;
         }
 
         debug("%04d/%02d/%02d %02d:%02d:%02d theme_num:%d mod:%d\n",
@@ -3653,5 +3654,3 @@ grub_err_t ventoy_cmd_pop_menulang(grub_extcmd_context_t ctxt, int argc, char **
 
     VENTOY_CMD_RETURN(0);
 }
-
-

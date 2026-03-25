@@ -33,7 +33,6 @@
 #include <grub/ventoy.h>
 
 #include "ventoy_vfat.h"
-#include "ventoy_compat.h"
 
 typedef grub_packed_guid_t ventoy_guid;
 
@@ -741,11 +740,6 @@ grub_uint64_t ventoy_grub_get_file_size(const char *fmt, ...);
 int ventoy_is_dir_exist(const char *fmt, ...);
 int ventoy_fill_data(grub_uint32_t buflen, char *buffer);
 grub_err_t ventoy_cmd_load_plugin(grub_extcmd_context_t ctxt, int argc, char **args);
-grub_err_t grub_cmd_vt_load_plugin(grub_extcmd_context_t ctxt, int argc, char **args);
-grub_err_t grub_cmd_vt_check_plugin_json(grub_extcmd_context_t ctxt, int argc, char **args);
-grub_err_t grub_cmd_vt_select_auto_install(grub_extcmd_context_t ctxt, int argc, char **args);
-grub_err_t grub_cmd_vt_select_persistence(grub_extcmd_context_t ctxt, int argc, char **args);
-grub_err_t grub_cmd_vt_select_conf_replace(grub_extcmd_context_t ctxt, int argc, char **args);
 grub_err_t ventoy_cmd_wimdows_reset(grub_extcmd_context_t ctxt, int argc, char **args);
 grub_err_t ventoy_cmd_is_pe64(grub_extcmd_context_t ctxt, int argc, char **args);
 grub_err_t ventoy_cmd_windows_chain_data(grub_extcmd_context_t ctxt, int argc, char **args);
@@ -1393,36 +1387,5 @@ int ventoy_ctrl_var_init(void);
 int ventoy_global_var_init(void);
 grub_err_t ventoy_cmd_push_menulang(grub_extcmd_context_t ctxt, int argc, char **args);
 grub_err_t ventoy_cmd_pop_menulang(grub_extcmd_context_t ctxt, int argc, char **args);
-
-/* Compatibility aliases for current grub_port implementation names. */
-#ifndef VTOY_OFFSET_OF
-#define VTOY_OFFSET_OF(type, member) OFFSET_OF(type, member)
-#endif
-
-#define grub_ventoy_patch_vhd ventoy_patch_vhd
-#define grub_ventoy_iso9660_override ventoy_iso9660_override
-#define grub_ventoy_udf_override ventoy_udf_override
-#define grub_ventoy_wim_stream_entry wim_stream_entry
-#define grub_ventoy_windows_patch ventoy_windows_patch
-#define grub_ventoy_windows_reg_vk reg_vk
-
-typedef struct ventoy_windows_patch_blob_header
-{
-    grub_uint32_t total_patch_count;
-    grub_uint32_t valid_patch_count;
-    grub_uint32_t record_size;
-    grub_uint32_t reserved;
-}ventoy_windows_patch_blob_header;
-
-typedef struct ventoy_windows_patch_blob_record
-{
-    grub_uint8_t valid;
-    grub_uint8_t reserved0[3];
-    grub_uint32_t pathlen;
-    char path[256];
-}ventoy_windows_patch_blob_record;
-
-#define grub_ventoy_windows_patch_blob_header ventoy_windows_patch_blob_header
-#define grub_ventoy_windows_patch_blob_record ventoy_windows_patch_blob_record
 
 #endif /* __VENTOY_DEF_H__ */

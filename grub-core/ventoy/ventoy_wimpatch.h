@@ -15,6 +15,7 @@
 #include <grub/file.h>
 #include <grub/types.h>
 #include "ventoy_def.h"
+#include "ventoy_compat.h"
 
 void
 grub_ventoy_wimpatch_reset (void);

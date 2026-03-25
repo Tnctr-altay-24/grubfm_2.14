@@ -483,6 +483,27 @@ ventoy_compat_get_gpt_priority (grub_disk_t disk, grub_partition_t part,
   return 0;
 }
 
+int
+ventoy_compat_efi_secureboot_enabled (void)
+{
+#ifdef GRUB_MACHINE_EFI
+  grub_uint8_t *var = NULL;
+  grub_size_t size = 0;
+  grub_guid_t global = GRUB_EFI_GLOBAL_VARIABLE_GUID;
+  grub_efi_status_t status;
+  int enabled = 0;
+
+  status = grub_efi_get_variable ("SecureBoot", &global, &size, (void **) &var);
+  if (status == GRUB_EFI_SUCCESS && var && size > 0 && *var == 1)
+    enabled = 1;
+
+  grub_free (var);
+  return enabled;
+#else
+  return 0;
+#endif
+}
+
 static char *
 ventoy_compat_root_write (struct grub_env_var *var __attribute__ ((unused)),
                           const char *val)
@@ -556,4 +577,3 @@ ventoy_compat_iso9660_is_joliet (void)
   (void) g_ventoy_iso_nojoliet;
   return 0;
 }
-

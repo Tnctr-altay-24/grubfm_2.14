@@ -19,6 +19,7 @@
 #include "ventoy_wim.h"
 #include "ventoy_wimpatch.h"
 #include "ventoy_def.h"
+#include "ventoy_compat.h"
 
 static struct grub_ventoy_windows_patch *grub_ventoy_wimpatch_patch_head;
 static grub_uint32_t grub_ventoy_wimpatch_patch_count;

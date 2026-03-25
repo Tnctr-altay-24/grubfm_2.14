@@ -1274,7 +1274,7 @@ module = {
 };
 
 module = {
-  name = ventoycore;
+  name = ventoy;
   common = ventoy/ventoy.c;
   common = ventoy/ventoy_cmd.c;
   common = ventoy/ventoy_compat.c;
@@ -1283,29 +1283,8 @@ module = {
   common = ventoy/ventoy_browser.c;
   common = ventoy/ventoy_vhd.c;
   common = ventoy/ventoy_miniz.c;
-
-  cflags = '-Wno-strict-aliasing -fshort-wchar';
-  cppflags = '-I$(srcdir)/map/include -I$(srcdir)/ventoy';
-  enable = efi;
-  enable = i386_pc;
-  enable = i386_multiboot;
-};
-
-module = {
-  name = ventoylinux;
   common = ventoy/ventoy_linux.c;
   common = ventoy/ventoy_unix.c;
-  depends = ventoycore;
-
-  cflags = '-Wno-strict-aliasing -fshort-wchar';
-  cppflags = '-I$(srcdir)/map/include -I$(srcdir)/ventoy';
-  enable = efi;
-  enable = i386_pc;
-  enable = i386_multiboot;
-};
-
-module = {
-  name = ventoywindows;
   common = ventoy/ventoy_windows.c;
   common = ventoy/ventoy_wimpatch.c;
   common = ventoy/ventoy_huffman.c;
@@ -1313,7 +1292,6 @@ module = {
   common = ventoy/ventoy_xpress.c;
   common = ventoy/ventoy_wim.c;
   common = ventoy/ventoy_wimtools.c;
-  depends = ventoycore;
 
   cflags = '-Wno-strict-aliasing -fshort-wchar';
   cppflags = '-I$(srcdir)/map/include -I$(srcdir)/ventoy';

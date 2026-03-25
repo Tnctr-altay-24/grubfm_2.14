@@ -41,6 +41,29 @@ GRUB_MOD_LICENSE ("GPLv3+");
 #define VTOY_APPEND_EXT_SIZE 4096
 static int g_append_ext_sector = 0;
 
+char * ventoy_get_line(char *start)
+{
+    if (start == NULL)
+    {
+        return NULL;
+    }
+
+    while (*start && *start != '\n')
+    {
+        start++;
+    }
+
+    if (*start == 0)
+    {
+        return NULL;
+    }
+    else
+    {
+        *start = 0;
+        return start + 1;
+    }
+}
+
 static initrd_info * ventoy_find_initrd_by_name(initrd_info *list, const char *name)
 {
     initrd_info *node = list;
@@ -2093,75 +2116,4 @@ grub_err_t ventoy_cmd_linux_limine_menu(grub_extcmd_context_t ctxt, int argc, ch
 end:
     grub_check_free(filebuf);
     VENTOY_CMD_RETURN(GRUB_ERR_NONE);
-}
-
-static cmd_para ventoy_linux_cmds[] =
-{
-    { "vt_skip_svd", ventoy_cmd_skip_svd, 0, NULL, "", "", NULL },
-    { "vt_cpio_busybox64", ventoy_cmd_cpio_busybox_64, 0, NULL, "", "", NULL },
-    { "vt_load_cpio", ventoy_cmd_load_cpio, 0, NULL, "", "", NULL },
-    { "vt_trailer_cpio", ventoy_cmd_trailer_cpio, 0, NULL, "", "", NULL },
-    { "vt_linux_parse_initrd_isolinux", ventoy_cmd_isolinux_initrd_collect, 0, NULL, "{cfgfile}", "", NULL },
-    { "vt_linux_parse_initrd_grub", ventoy_cmd_grub_initrd_collect, 0, NULL, "{cfgfile}", "", NULL },
-    { "vt_linux_specify_initrd_file", ventoy_cmd_specify_initrd_file, 0, NULL, "", "", NULL },
-    { "vt_linux_clear_initrd", ventoy_cmd_clear_initrd_list, 0, NULL, "", "", NULL },
-    { "vt_linux_dump_initrd", ventoy_cmd_dump_initrd_list, 0, NULL, "", "", NULL },
-    { "vt_linux_initrd_count", ventoy_cmd_initrd_count, 0, NULL, "", "", NULL },
-    { "vt_linux_valid_initrd_count", ventoy_cmd_valid_initrd_count, 0, NULL, "", "", NULL },
-    { "vt_linux_locate_initrd", ventoy_cmd_linux_locate_initrd, 0, NULL, "", "", NULL },
-    { "vt_linux_chain_data", ventoy_cmd_linux_chain_data, 0, NULL, "", "", NULL },
-    { "vt_linux_get_main_initrd_index", ventoy_cmd_linux_get_main_initrd_index, 0, NULL, "", "", NULL },
-    { "vt_parse_freenas_ver", ventoy_cmd_parse_freenas_ver, 0, NULL, "", "", NULL },
-    { "vt_unix_parse_freebsd_ver", ventoy_cmd_unix_freebsd_ver, 0, NULL, "", "", NULL },
-    { "vt_unix_parse_freebsd_ver_elf", ventoy_cmd_unix_freebsd_ver_elf, 0, NULL, "", "", NULL },
-    { "vt_unix_reset", ventoy_cmd_unix_reset, 0, NULL, "", "", NULL },
-    { "vt_unix_check_vlnk", ventoy_cmd_unix_check_vlnk, 0, NULL, "", "", NULL },
-    { "vt_unix_replace_conf", ventoy_cmd_unix_replace_conf, 0, NULL, "", "", NULL },
-    { "vt_unix_replace_grub_conf", ventoy_cmd_unix_replace_grub_conf, 0, NULL, "", "", NULL },
-    { "vt_unix_replace_ko", ventoy_cmd_unix_replace_ko, 0, NULL, "", "", NULL },
-    { "vt_unix_ko_fillmap", ventoy_cmd_unix_ko_fillmap, 0, NULL, "", "", NULL },
-    { "vt_unix_fill_image_desc", ventoy_cmd_unix_fill_image_desc, 0, NULL, "", "", NULL },
-    { "vt_unix_gzip_new_ko", ventoy_cmd_unix_gzip_newko, 0, NULL, "", "", NULL },
-    { "vt_unix_chain_data", ventoy_cmd_unix_chain_data, 0, NULL, "", "", NULL },
-    { "vt_append_extra_sector", ventoy_cmd_append_ext_sector, 0, NULL, "", "", NULL },
-    { "vt_systemd_menu", ventoy_cmd_linux_systemd_menu, 0, NULL, "", "", NULL },
-    { "vt_limine_menu", ventoy_cmd_linux_limine_menu, 0, NULL, "", "", NULL },
-    { "vt_linux_initrd", ventoy_cmd_linux_initrd, 0, NULL, "", "", NULL },
-};
-
-static void ventoy_register_linux_cmds(void)
-{
-    grub_uint32_t i;
-    cmd_para *cur;
-
-    for (i = 0; i < ARRAY_SIZE(ventoy_linux_cmds); i++)
-    {
-        cur = ventoy_linux_cmds + i;
-        cur->cmd = grub_register_extcmd(cur->name, cur->func, cur->flags,
-                                        cur->summary, cur->description, cur->parser);
-    }
-}
-
-static void ventoy_unregister_linux_cmds(void)
-{
-    grub_uint32_t i;
-
-    for (i = 0; i < ARRAY_SIZE(ventoy_linux_cmds); i++)
-    {
-        if (ventoy_linux_cmds[i].cmd)
-        {
-            grub_unregister_extcmd(ventoy_linux_cmds[i].cmd);
-            ventoy_linux_cmds[i].cmd = NULL;
-        }
-    }
-}
-
-GRUB_MOD_INIT(ventoylinux)
-{
-    ventoy_register_linux_cmds();
-}
-
-GRUB_MOD_FINI(ventoylinux)
-{
-    ventoy_unregister_linux_cmds();
 }

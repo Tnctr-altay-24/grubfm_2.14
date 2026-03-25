@@ -182,27 +182,6 @@ char * ventoy_str_basename(char *path)
     return pos;
 }
 
-char * ventoy_get_line(char *start)
-{
-    if (start == NULL)
-    {
-        return NULL;
-    }
-
-    while (*start && *start != '\n')
-    {
-        start++;
-    }
-
-    if (*start == 0)
-    {
-        return NULL;
-    }
-
-    *start = 0;
-    return start + 1;
-}
-
 int ventoy_str_chrcnt(const char *str, char c)
 {
     int n = 0;
