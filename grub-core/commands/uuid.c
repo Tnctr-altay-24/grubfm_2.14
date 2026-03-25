@@ -37,14 +37,14 @@ GRUB_MOD_LICENSE ("GPLv3+");
 /* rand() and srand() */
 static grub_uint32_t next = 1;
 
-grub_uint32_t
+static grub_uint32_t
 grub_rand (void)
 {
   next = next * 1103515245 + 12345;
   return (next << 16) | ((next >> 16) & 0xFFFF);
 }
 
-void
+static void
 grub_srand (grub_uint32_t seed)
 {
   next = seed;

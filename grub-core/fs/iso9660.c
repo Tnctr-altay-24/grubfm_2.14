@@ -30,6 +30,12 @@
 #include <grub/datetime.h>
 #include <grub/safemath.h>
 
+grub_uint64_t
+grub_iso9660_get_last_read_pos (grub_file_t file);
+
+grub_uint64_t
+grub_iso9660_get_last_file_dirent_pos (grub_file_t file);
+
 GRUB_MOD_LICENSE ("GPLv3+");
 
 #define GRUB_ISO9660_FSTYPE_DIR		0040000

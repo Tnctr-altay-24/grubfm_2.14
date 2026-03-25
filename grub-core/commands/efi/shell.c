@@ -77,6 +77,9 @@ enum options_shell
 };
 
 grub_err_t
+grub_efi_shell_chain (int argc, char *argv[], grub_efi_device_path_t *dp);
+
+grub_err_t
 grub_efi_shell_chain (int argc, char *argv[], grub_efi_device_path_t *dp)
 {
   grub_efi_status_t status;

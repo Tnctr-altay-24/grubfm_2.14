@@ -91,6 +91,7 @@ get_uuid (const char *name, char **uuid, int getnative)
     case GRUB_DISK_DEVICE_CBFSDISK_ID:
       /* GRUB-only memdisk. Can't match any of firmware devices.  */
     case GRUB_DISK_DEVICE_MEMDISK_ID:
+    case GRUB_DISK_DEVICE_MEM_ID:
       grub_dprintf ("nativedisk", "Skipping native disk %s\n",
 		    dev->disk->name);
       grub_device_close (dev);
