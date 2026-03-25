@@ -154,7 +154,8 @@ grub_chainloader_boot (void *context)
 	    }
 	}
       else
-	grub_error (GRUB_ERR_BAD_OS, "unknown error");
+	grub_error (GRUB_ERR_BAD_OS, "unknown error (StartImage status=0x%lx)",
+		    (unsigned long) status);
     }
 
   if (exit_data)

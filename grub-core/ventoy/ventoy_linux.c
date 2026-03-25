@@ -41,6 +41,18 @@ GRUB_MOD_LICENSE ("GPLv3+");
 #define VTOY_APPEND_EXT_SIZE 4096
 static int g_append_ext_sector = 0;
 
+static int ventoy_diag_enabled(void)
+{
+    const char *diag = grub_env_get("vtoy_diag");
+    if (!diag)
+    {
+        return 0;
+    }
+
+    return (diag[0] == '1' || diag[0] == 'Y' || diag[0] == 'y' ||
+            (diag[0] == 'o' && diag[1] == 'n'));
+}
+
 char * ventoy_get_line(char *start)
 {
     if (start == NULL)
@@ -1640,6 +1652,8 @@ grub_err_t ventoy_cmd_trailer_cpio(grub_extcmd_context_t ctxt, int argc, char **
 grub_err_t ventoy_cmd_linux_chain_data(grub_extcmd_context_t ctxt, int argc, char **args)
 {
     int len = 0;
+    int is_efi = 0;
+    int has_efi_eltorito = 0;
     int ventoy_compatible = 0;
     grub_uint32_t size = 0;
     grub_uint64_t isosize = 0;
@@ -1673,10 +1687,21 @@ grub_err_t ventoy_cmd_linux_chain_data(grub_extcmd_context_t ctxt, int argc, cha
     file = ventoy_grub_file_open(VENTOY_FILE_TYPE, "%s", args[0]);
     if (!file)
     {
+        if (ventoy_diag_enabled())
+        {
+            grub_printf("[VTOY_DIAG] linux_chain open failed: %s\n", args[0]);
+        }
         return 1;
     }
 
     isosize = file->size;
+    is_efi = ventoy_is_efi_os();
+    if (ventoy_diag_enabled())
+    {
+        grub_printf("[VTOY_DIAG] linux_chain image=%s size=%llu fs=%s efi=%d compat=%d\n",
+            args[0], (ulonglong)isosize, (file->fs && file->fs->name) ? file->fs->name : "unknown",
+            is_efi, ventoy_compatible);
+    }
 
     len = (int)grub_strlen(args[0]);
     if (len >= 4 && 0 == grub_strcasecmp(args[0] + len - 4, ".img"))
@@ -1685,17 +1710,33 @@ grub_err_t ventoy_cmd_linux_chain_data(grub_extcmd_context_t ctxt, int argc, cha
     }
     else
     {
+        if (is_efi)
+        {
+            grub_env_set("LoadIsoEfiDriver", "on");
+        }
+
         boot_catlog = ventoy_get_iso_boot_catlog(file);
+        if (ventoy_diag_enabled())
+        {
+            grub_printf("[VTOY_DIAG] linux_chain boot_catalog=0x%x (%u)\n",
+                boot_catlog, boot_catlog);
+        }
         if (boot_catlog)
         {
-            if (ventoy_is_efi_os() && (!ventoy_has_efi_eltorito(file, boot_catlog)))
+            has_efi_eltorito = ventoy_has_efi_eltorito(file, boot_catlog);
+            if (ventoy_diag_enabled())
+            {
+                grub_printf("[VTOY_DIAG] linux_chain has_efi_eltorito=%d\n", has_efi_eltorito);
+            }
+
+            if (is_efi && (!has_efi_eltorito))
             {
                 grub_env_set("LoadIsoEfiDriver", "on");
             }
         }
         else
         {
-            if (ventoy_is_efi_os())
+            if (is_efi)
             {
                 grub_env_set("LoadIsoEfiDriver", "on");
             }
@@ -1704,6 +1745,12 @@ grub_err_t ventoy_cmd_linux_chain_data(grub_extcmd_context_t ctxt, int argc, cha
                 return grub_error(GRUB_ERR_BAD_ARGUMENT, "File %s is not bootable", args[0]);
             }
         }
+    }
+    if (ventoy_diag_enabled())
+    {
+        const char *isoefi = grub_env_get("LoadIsoEfiDriver");
+        grub_printf("[VTOY_DIAG] linux_chain LoadIsoEfiDriver=%s\n",
+            isoefi ? isoefi : "(null)");
     }
     
     img_chunk_size = g_img_chunk_list.cur_chunk * sizeof(ventoy_img_chunk);

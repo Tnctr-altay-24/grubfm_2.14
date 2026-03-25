@@ -173,6 +173,18 @@ static char g_json_case_mis_path[32];
 
 static ventoy_vlnk_part *g_vlnk_part_list = NULL;
 
+static int ventoy_diag_enabled(void)
+{
+    const char *diag = grub_env_get("vtoy_diag");
+    if (!diag)
+    {
+        return 0;
+    }
+
+    return (diag[0] == '1' || diag[0] == 'Y' || diag[0] == 'y' ||
+            (diag[0] == 'o' && diag[1] == 'n'));
+}
+
 int ventoy_get_fs_type(const char *fs)
 {
     if (NULL == fs)
@@ -3115,6 +3127,11 @@ grub_uint32_t ventoy_get_iso_boot_catlog(grub_file_t file)
     grub_memset(&desc, 0, sizeof(desc));
     grub_file_seek(file, 17 * 2048);
     grub_file_read(file, &desc, sizeof(desc));
+    if (ventoy_diag_enabled())
+    {
+        grub_printf("[VTOY_DIAG] boot_catalog probe file=%s type=0x%x ver=0x%x sector=0x%x\n",
+            file->name, desc.type, desc.version, desc.sector);
+    }
 
     if (desc.type != 0 || desc.version != 1)
     {
@@ -3155,6 +3172,12 @@ int ventoy_has_efi_eltorito(grub_file_t file, grub_uint32_t sector)
 
     grub_file_seek(file, sector * 2048);
     grub_file_read(file, buf, sizeof(buf));
+    if (ventoy_diag_enabled())
+    {
+        grub_printf("[VTOY_DIAG] efi_eltorito file=%s sector=0x%x "
+                    "buf0=0x%02x buf1=0x%02x byte32=0x%02x byte33=0x%02x byte36=0x%02x\n",
+                    file->name, sector, buf[0], buf[1], buf[32], buf[33], buf[36]);
+    }
 
     if (buf[0] == 0x01 && buf[1] == 0xEF)
     {
@@ -3352,7 +3375,7 @@ int ventoy_get_block_list(grub_file_t file, ventoy_img_chunk_list *chunklist, gr
     grub_uint32_t count = 0;
 
     fs_type = ventoy_get_fs_type(file->fs->name);
-    if (fs_type == ventoy_fs_exfat)
+    if (fs_type == ventoy_fs_exfat || fs_type == ventoy_fs_fat)
     {
         grub_fat_get_file_chunk(start, file, chunklist);        
     }
