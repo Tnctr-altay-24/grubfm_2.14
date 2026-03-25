@@ -711,6 +711,8 @@ grub_err_t ventoy_env_int_set(const char *name, int value);
 int ventoy_str_chrcnt(const char *str, char c);
 int ventoy_strcmp(const char *pattern, const char *str);
 int ventoy_strncmp (const char *pattern, const char *str, grub_size_t n);
+int ventoy_is_efi_os(void);
+void ventoy_memfile_env_set(const char *prefix, const void *buf, unsigned long long len);
 void ventoy_fill_os_param(grub_file_t file, ventoy_os_param *param);
 grub_err_t ventoy_cmd_isolinux_initrd_collect(grub_extcmd_context_t ctxt, int argc, char **args);
 grub_err_t ventoy_cmd_grub_initrd_collect(grub_extcmd_context_t ctxt, int argc, char **args);

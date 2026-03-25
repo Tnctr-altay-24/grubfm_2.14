@@ -1275,7 +1275,7 @@ module = {
 
 module = {
   name = ventoycore;
-  common = ventoy/core.c;
+  common = ventoy/ventoy.c;
   common = ventoy/ventoy_json.c;
   common = ventoy/ventoy_plugin.c;
 
