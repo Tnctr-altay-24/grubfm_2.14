@@ -255,7 +255,6 @@ ventoy_compat_get_file_chunk (grub_uint64_t part_start, grub_file_t file,
   grub_disk_read_hook_t old_read_hook;
   void *old_read_hook_data;
   ventoy_chunk_hook_ctx ctx;
-  grub_uint32_t i;
 
   if (!file || !file->device || !file->device->disk || !chunk_list)
     return 1;
@@ -290,11 +289,16 @@ ventoy_compat_get_file_chunk (grub_uint64_t part_start, grub_file_t file,
   file->read_hook_data = old_read_hook_data;
   grub_free (buf);
 
-  for (i = 0; i < chunk_list->cur_chunk; i++)
-    {
-      chunk_list->chunk[i].disk_start_sector += part_start;
-      chunk_list->chunk[i].disk_end_sector += part_start;
-    }
+  /*
+   * Keep modern-GRUB semantics: disk read hook receives disk-relative sector
+   * (partition offset already applied by grub_disk_adjust_range()).
+   *
+   * Upstream Ventoy 2.04 added part_start here because their patched
+   * grub_disk_read() fed partition-relative sectors to blocklist hook.
+   * In this port, adding part_start again causes double-offset and invalid LBA
+   * (notably on NTFS path).
+   */
+  (void) part_start;
 
   return 0;
 }
