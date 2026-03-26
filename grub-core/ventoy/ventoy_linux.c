@@ -815,6 +815,13 @@ static void ventoy_linux_fill_virt_data(    grub_uint64_t isosize, ventoy_chain_
     offset = ventoy_linux_get_virt_chunk_count() * sizeof(ventoy_virt_chunk);
     cur = (ventoy_virt_chunk *)override;
 
+    if (ventoy_diag_enabled())
+    {
+        grub_printf("[VTOY_DIAG] fill_virt begin: valid_initrd=%u cpio_size=%u cpio_secs=%u virt_chunk_cnt=%u base_sector=%llu\n",
+            g_valid_initrd_count, g_ventoy_cpio_size, cpio_secs,
+            ventoy_linux_get_virt_chunk_count(), (ulonglong)sector);
+    }
+
     for (node = g_initrd_img_list; node; node = node->next)
     {
         if (node->size == 0)
@@ -843,6 +850,16 @@ static void ventoy_linux_fill_virt_data(    grub_uint64_t isosize, ventoy_chain_
 
         chain->virt_img_size_in_bytes += g_ventoy_cpio_size + initrd_secs * 2048;
 
+        if (ventoy_diag_enabled())
+        {
+            grub_printf("[VTOY_DIAG] fill_virt initrd id=%d name=%s org=[%u,%u) mem=[%u,%u) remap=[%u,%u) cpio=%u initrd_secs=%u\n",
+                id, node->name, (grub_uint32_t)(node->offset / 2048),
+                (grub_uint32_t)(node->offset / 2048) + initrd_secs,
+                cur->mem_sector_start, cur->mem_sector_end,
+                cur->remap_sector_start, cur->remap_sector_end,
+                g_ventoy_cpio_size, initrd_secs);
+        }
+
         offset += g_ventoy_cpio_size;
         sector += cpio_secs + initrd_secs;
         cur++;
@@ -869,6 +886,12 @@ static void ventoy_linux_fill_virt_data(    grub_uint64_t isosize, ventoy_chain_
         sector += cpio_secs;
         cur++;
         virtid++;
+
+        if (ventoy_diag_enabled())
+        {
+            grub_printf("[VTOY_DIAG] fill_virt append_ext mem=[%u,%u) size=%u\n",
+                (cur - 1)->mem_sector_start, (cur - 1)->mem_sector_end, VTOY_APPEND_EXT_SIZE);
+        }
     }
 
     if (g_conf_replace_count > 0)
@@ -911,6 +934,12 @@ static void ventoy_linux_fill_virt_data(    grub_uint64_t isosize, ventoy_chain_
                 virtid++;
             }
         }
+    }
+
+    if (ventoy_diag_enabled())
+    {
+        grub_printf("[VTOY_DIAG] fill_virt done: virtid=%d virt_img_size=%llu\n",
+            virtid, (ulonglong)chain->virt_img_size_in_bytes);
     }
 
     return;
@@ -1367,8 +1396,19 @@ grub_err_t ventoy_cmd_load_cpio(grub_extcmd_context_t ctxt, int argc, char **arg
         return grub_error(GRUB_ERR_BAD_ARGUMENT, "Usage: %s cpiofile\n", cmd_raw_name); 
     }
 
+    if (ventoy_diag_enabled())
+    {
+        grub_printf("[VTOY_DIAG] load_cpio args path=%s iso=%s part=%s opt=%s chunk_ptr=%p chunk_cnt=%u\n",
+            args[0], args[1], args[2], args[3], g_img_chunk_list.chunk, g_img_chunk_list.cur_chunk);
+    }
+
     if (g_img_chunk_list.chunk == NULL || g_img_chunk_list.cur_chunk == 0)
     {
+        if (ventoy_diag_enabled())
+        {
+            grub_printf("[VTOY_DIAG] load_cpio abort: image chunk is null (chunk=%p cnt=%u)\n",
+                g_img_chunk_list.chunk, g_img_chunk_list.cur_chunk);
+        }
         return grub_error(GRUB_ERR_BAD_ARGUMENT, "image chunk is null\n");
     }
 
@@ -1377,14 +1417,29 @@ grub_err_t ventoy_cmd_load_cpio(grub_extcmd_context_t ctxt, int argc, char **arg
     file = ventoy_grub_file_open(VENTOY_FILE_TYPE, "%s/%s", args[0], VTOY_COMM_CPIO);
     if (!file)
     {
+        if (ventoy_diag_enabled())
+        {
+            grub_printf("[VTOY_DIAG] load_cpio open fail: %s/%s\n", args[0], VTOY_COMM_CPIO);
+        }
         return grub_error(GRUB_ERR_BAD_ARGUMENT, "Can't open file %s/%s\n", args[0], VTOY_COMM_CPIO); 
     }
 
     archfile = ventoy_grub_file_open(VENTOY_FILE_TYPE, "%s/%s", args[0], VTOY_ARCH_CPIO);
     if (!archfile)
     {
+        if (ventoy_diag_enabled())
+        {
+            grub_printf("[VTOY_DIAG] load_cpio open fail: %s/%s\n", args[0], VTOY_ARCH_CPIO);
+        }
         return grub_error(GRUB_ERR_BAD_ARGUMENT, "Can't open file %s/%s\n", args[0], VTOY_ARCH_CPIO);
         grub_file_close(file);
+    }
+
+    if (ventoy_diag_enabled())
+    {
+        grub_printf("[VTOY_DIAG] load_cpio open ok: %s/%s size=%llu, %s/%s size=%llu\n",
+            args[0], VTOY_COMM_CPIO, (ulonglong)file->size,
+            args[0], VTOY_ARCH_CPIO, (ulonglong)archfile->size);
     }
 
     debug("load %s %s success\n", VTOY_COMM_CPIO, VTOY_ARCH_CPIO);
@@ -1472,7 +1527,19 @@ grub_err_t ventoy_cmd_load_cpio(grub_extcmd_context_t ctxt, int argc, char **arg
     {
         grub_file_close(file);
         grub_file_close(archfile);
+        if (ventoy_diag_enabled())
+        {
+            grub_printf("[VTOY_DIAG] load_cpio alloc fail: comm=%llu arch=%llu tmpl=%u persist=%u inj=%u dud=%u chunk=%u\n",
+                (ulonglong)file->size, (ulonglong)archfile->size, template_size,
+                persistent_size, injection_size, dud_size, img_chunk_size);
+        }
         return grub_error(GRUB_ERR_BAD_ARGUMENT, "Can't alloc memory %llu\n", (ulonglong)file->size);
+    }
+
+    if (ventoy_diag_enabled())
+    {
+        grub_printf("[VTOY_DIAG] load_cpio payload sizes: tmpl=%u persist=%u inj=%u dud=%u img_chunk=%u alloc_ptr=%p\n",
+            template_size, persistent_size, injection_size, dud_size, img_chunk_size, g_ventoy_cpio_buf);
     }
 
     grub_file_read(file, g_ventoy_cpio_buf, file->size);
@@ -1550,6 +1617,12 @@ grub_err_t ventoy_cmd_load_cpio(grub_extcmd_context_t ctxt, int argc, char **arg
     g_ventoy_initrd_head = (cpio_newc_header *)(g_ventoy_runtime_buf + padlen);
     ventoy_cpio_newc_fill_head(g_ventoy_initrd_head, 0, NULL, "initrd000.xx");
 
+    if (ventoy_diag_enabled())
+    {
+        grub_printf("[VTOY_DIAG] load_cpio built: cpio_size=%u runtime_buf=%p initrd_head=%p headlen=%u padlen=%u initrd_head_len=%u\n",
+            g_ventoy_cpio_size, g_ventoy_runtime_buf, g_ventoy_initrd_head, headlen, padlen, initrd_head_len);
+    }
+
     grub_file_close(file);
     grub_file_close(archfile);
 
@@ -1567,6 +1640,12 @@ grub_err_t ventoy_cmd_load_cpio(grub_extcmd_context_t ctxt, int argc, char **arg
     {
         debug("cpio busybox proc %s\n", args[3]);
         ventoy_cpio_busybox64((cpio_newc_header *)g_ventoy_cpio_buf, "m64");
+    }
+
+    if (ventoy_diag_enabled())
+    {
+        grub_printf("[VTOY_DIAG] load_cpio done: busybox_opt=%s cpio_ptr=%p cpio_size=%u\n",
+            args[3], g_ventoy_cpio_buf, g_ventoy_cpio_size);
     }
 
     VENTOY_CMD_RETURN(GRUB_ERR_NONE);
@@ -1655,6 +1734,12 @@ grub_err_t ventoy_cmd_trailer_cpio(grub_extcmd_context_t ctxt, int argc, char **
 
     ventoy_memfile_env_set("ventoy_cpio", g_ventoy_cpio_buf, (ulonglong)bufsize);
 
+    if (ventoy_diag_enabled())
+    {
+        grub_printf("[VTOY_DIAG] trailer_cpio memfile: ptr=%p size=%d env_addr=%s env_size=%s\n",
+            g_ventoy_cpio_buf, bufsize, grub_env_get("ventoy_cpio_addr"), grub_env_get("ventoy_cpio_size"));
+    }
+
     VENTOY_CMD_RETURN(GRUB_ERR_NONE);
 }
 
@@ -1689,6 +1774,12 @@ grub_err_t ventoy_cmd_linux_chain_data(grub_extcmd_context_t ctxt, int argc, cha
 
     if ((NULL == g_img_chunk_list.chunk) || (0 == ventoy_compatible && g_ventoy_cpio_buf == NULL))
     {
+        if (ventoy_diag_enabled())
+        {
+            grub_printf("[VTOY_DIAG] linux_chain not ready: chunk_ptr=%p chunk_cnt=%u compat=%d cpio_ptr=%p cpio_size=%u\n",
+                g_img_chunk_list.chunk, g_img_chunk_list.cur_chunk, ventoy_compatible,
+                g_ventoy_cpio_buf, g_ventoy_cpio_size);
+        }
         grub_printf("ventoy not ready\n");
         return 1;
     }
@@ -1766,6 +1857,12 @@ grub_err_t ventoy_cmd_linux_chain_data(grub_extcmd_context_t ctxt, int argc, cha
 
     override_count = ventoy_linux_get_override_chunk_count();
     virt_chunk_count = ventoy_linux_get_virt_chunk_count();
+
+    if (ventoy_diag_enabled())
+    {
+        grub_printf("[VTOY_DIAG] linux_chain chunks: img=%u override=%u virt=%u img_chunk_size=%u\n",
+            g_img_chunk_list.cur_chunk, override_count, virt_chunk_count, img_chunk_size);
+    }
     
     if (ventoy_compatible)
     {
@@ -1798,6 +1895,12 @@ grub_err_t ventoy_cmd_linux_chain_data(grub_extcmd_context_t ctxt, int argc, cha
     }
 
     ventoy_memfile_env_set("vtoy_chain_mem", chain, (ulonglong)size);
+
+    if (ventoy_diag_enabled())
+    {
+        grub_printf("[VTOY_DIAG] linux_chain alloc: chain=%p size=%u mem_env_addr=%s mem_env_size=%s\n",
+            chain, size, grub_env_get("vtoy_chain_mem_addr"), grub_env_get("vtoy_chain_mem_size"));
+    }
 
     grub_memset(chain, 0, sizeof(ventoy_chain_head));
 
@@ -1843,6 +1946,14 @@ grub_err_t ventoy_cmd_linux_chain_data(grub_extcmd_context_t ctxt, int argc, cha
         chain->virt_chunk_offset = chain->override_chunk_offset + override_size;
         chain->virt_chunk_num = virt_chunk_count;
         ventoy_linux_fill_virt_data(isosize, chain);
+    }
+
+    if (ventoy_diag_enabled())
+    {
+        grub_printf("[VTOY_DIAG] linux_chain done: real=%llu virt=%llu img_off=%u ov_off=%u virt_off=%u ov_num=%u virt_num=%u\n",
+            (ulonglong)chain->real_img_size_in_bytes, (ulonglong)chain->virt_img_size_in_bytes,
+            chain->img_chunk_offset, chain->override_chunk_offset, chain->virt_chunk_offset,
+            chain->override_chunk_num, chain->virt_chunk_num);
     }
 
     VENTOY_CMD_RETURN(GRUB_ERR_NONE);
