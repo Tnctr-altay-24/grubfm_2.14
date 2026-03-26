@@ -4093,6 +4093,7 @@ static grub_err_t ventoy_cmd_add_replace_file(grub_extcmd_context_t ctxt, int ar
     if (argc >= 2)
     {
         replace = &(g_grub_param->file_replace);
+        grub_memset(replace, 0, sizeof(*replace));
         replace->magic = GRUB_FILE_REPLACE_MAGIC;
             
         replace->old_name_cnt = 0;
@@ -4103,6 +4104,20 @@ static grub_err_t ventoy_cmd_add_replace_file(grub_extcmd_context_t ctxt, int ar
         }
         
         replace->new_file_virtual_id = (grub_uint32_t)grub_strtoul(args[0], NULL, 10);
+
+        if (ventoy_diag_enabled())
+        {
+            grub_printf("[VTOY_DIAG] add_replace_file idx=%u old_name_cnt=%u n0=<%s> n1=<%s> n2=<%s> n3=<%s>\n",
+                replace->new_file_virtual_id, replace->old_name_cnt,
+                replace->old_name_cnt > 0 ? replace->old_file_name[0] : "",
+                replace->old_name_cnt > 1 ? replace->old_file_name[1] : "",
+                replace->old_name_cnt > 2 ? replace->old_file_name[2] : "",
+                replace->old_name_cnt > 3 ? replace->old_file_name[3] : "");
+        }
+    }
+    else if (ventoy_diag_enabled())
+    {
+        grub_printf("[VTOY_DIAG] add_replace_file ignored argc=%d\n", argc);
     }
 
     VENTOY_CMD_RETURN(GRUB_ERR_NONE);

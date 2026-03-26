@@ -896,6 +896,15 @@ static void ventoy_linux_fill_virt_data(    grub_uint64_t isosize, ventoy_chain_
                     replace->new_file_virtual_id = virtid;
                 }
 
+                if (ventoy_diag_enabled())
+                {
+                    grub_printf("[VTOY_DIAG] conf_replace i=%d virtid=%d mem=[%u,%u) "
+                                "len=%d align=%d off=0x%llx magic=0x%x old_cnt=%u\n",
+                                i, virtid, cur->mem_sector_start, cur->mem_sector_end,
+                                g_conf_replace_new_len[i], g_conf_replace_new_len_align[i],
+                                (ulonglong)g_conf_replace_offset[i], replace->magic, replace->old_name_cnt);
+                }
+
                 offset += g_conf_replace_new_len_align[i];
                 sector += cpio_secs;
                 cur++;
