@@ -48,6 +48,7 @@ static const struct grub_arg_option options[] =
     {"fs-uuid",		'u', 0, N_("Determine filesystem UUID."), 0, 0},
     {"label",		'l', 0, N_("Determine filesystem label."), 0, 0},
     {"part-uuid",	0,   0, N_("Determine partition UUID."), 0, 0},
+    {"quiet",           'q', 0, N_("Don't print error."), 0, 0},
     {0, 0, 0, 0, 0, 0}
   };
 
@@ -176,6 +177,8 @@ grub_cmd_probe (grub_extcmd_context_t ctxt, int argc, char **args)
       if (! fs->fs_uuid)
 	{
 	  grub_device_close (dev);
+    if (state[7].set)
+      return GRUB_ERR_NONE;
 	  return grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
 			     N_("%s does not support UUIDs"), fs->name);
 	}
@@ -188,6 +191,8 @@ grub_cmd_probe (grub_extcmd_context_t ctxt, int argc, char **args)
       if (! uuid)
 	{
 	  grub_device_close (dev);
+    if (state[7].set)
+      return GRUB_ERR_NONE;
 	  return grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
 			     N_("%s does not support UUIDs"), fs->name);
 	}
@@ -206,6 +211,8 @@ grub_cmd_probe (grub_extcmd_context_t ctxt, int argc, char **args)
       if (! fs->fs_label)
 	{
 	  grub_device_close (dev);
+    if (state[7].set)
+      return GRUB_ERR_NONE;
 	  return grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
 			     N_("filesystem `%s' does not support labels"),
 			     fs->name);
@@ -219,6 +226,8 @@ grub_cmd_probe (grub_extcmd_context_t ctxt, int argc, char **args)
       if (! label)
 	{
 	  grub_device_close (dev);
+    if (state[7].set)
+      return GRUB_ERR_NONE;
 	  return grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
 			     N_("filesystem `%s' does not support labels"),
 			     fs->name);

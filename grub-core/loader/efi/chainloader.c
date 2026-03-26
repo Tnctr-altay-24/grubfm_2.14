@@ -37,6 +37,8 @@
 #include <grub/command.h>
 #include <grub/i18n.h>
 #include <grub/net.h>
+#include <grub/script_sh.h>
+#include <grub/term.h>
 #if defined (__i386__) || defined (__x86_64__)
 #include <grub/macho.h>
 #include <grub/i386/macho.h>
@@ -291,11 +293,52 @@ grub_cmd_chainloader (grub_command_t cmd __attribute__ ((unused)),
   grub_efi_char16_t *cmdline = NULL;
   grub_efi_handle_t image_handle = NULL;
   int fallback_dev_opened = 0;
+  int text_mode = 0;
+  int quiet = 0;
+
+  while (argc > 0)
+    {
+      if (grub_strcmp (argv[0], "-t") == 0 || grub_strcmp (argv[0], "--text") == 0)
+	{
+	  text_mode = 1;
+	  argc--;
+	  argv++;
+	  continue;
+	}
+      if (grub_strcmp (argv[0], "-q") == 0 || grub_strcmp (argv[0], "--quiet") == 0)
+	{
+	  quiet = 1;
+	  argc--;
+	  argv++;
+	  continue;
+	}
+      if (grub_strcmp (argv[0], "--") == 0)
+	{
+	  argc--;
+	  argv++;
+	  break;
+	}
+      break;
+    }
 
   if (argc == 0)
-    return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("filename expected"));
+    {
+      if (quiet)
+	return GRUB_ERR_NONE;
+      return grub_error (GRUB_ERR_BAD_ARGUMENT, N_("filename expected"));
+    }
   filename = argv[0];
   grub_dprintf ("chain", "chainloader argc=%d filename=%s\n", argc, filename);
+
+  if (text_mode)
+    {
+      grub_script_execute_sourcecode ("terminal_output console");
+      if (!quiet)
+	{
+	  grub_printf ("Switch to text mode.\n");
+	  grub_refresh ();
+	}
+    }
 
   grub_dl_ref (my_mod);
   chainloader_address = 0;
@@ -534,6 +577,12 @@ grub_cmd_chainloader (grub_command_t cmd __attribute__ ((unused)),
     grub_efi_unload_image (image_handle);
 
   grub_dl_unref (my_mod);
+
+  if (quiet)
+    {
+      grub_errno = GRUB_ERR_NONE;
+      return GRUB_ERR_NONE;
+    }
 
   return grub_errno;
 }
