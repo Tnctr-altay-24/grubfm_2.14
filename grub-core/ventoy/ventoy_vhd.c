@@ -50,6 +50,13 @@ static char *g_vhdboot_totbuf = NULL;
 static char *g_vhdboot_isobuf = NULL;
 static grub_uint64_t g_img_trim_head_secnum = 0;
 
+#ifndef VTOY_VHDTRACE_ENABLE
+#define VTOY_VHDTRACE_ENABLE 0
+#endif
+
+#define vhdtrace(fmt, args...) \
+    do { if (VTOY_VHDTRACE_ENABLE) grub_printf("[VHDTRACE] " fmt, ##args); } while (0)
+
 static int ventoy_vhd_find_bcd(int *bcdoffset, int *bcdlen, const char *path)
 {
     grub_uint32_t offset;
@@ -329,13 +336,13 @@ grub_err_t ventoy_cmd_patch_vhdboot(grub_extcmd_context_t ctxt, int argc, char *
 
     grub_env_unset("vtoy_vhd_buf_addr");
 
-    grub_printf("[VHDTRACE] patch begin arg=%s enable=%d tot=%p iso=%p isolen=%d\n",
+    vhdtrace("patch begin arg=%s enable=%d tot=%p iso=%p isolen=%d\n",
                 args[0], g_vhdboot_enable, g_vhdboot_totbuf, g_vhdboot_isobuf, g_vhdboot_isolen);
     debug("patch vhd <%s>\n", args[0]);
 
     if ((!g_vhdboot_enable) || (!g_vhdboot_totbuf))
     {
-        grub_printf("[VHDTRACE] patch skip not-ready enable=%d tot=%p\n", g_vhdboot_enable, g_vhdboot_totbuf);
+        vhdtrace("patch skip not-ready enable=%d tot=%p\n", g_vhdboot_enable, g_vhdboot_totbuf);
         debug("vhd boot not ready %d %p\n", g_vhdboot_enable, g_vhdboot_totbuf);
         return 0;
     }
@@ -343,14 +350,14 @@ grub_err_t ventoy_cmd_patch_vhdboot(grub_extcmd_context_t ctxt, int argc, char *
     rc = ventoy_vhd_find_bcd(&bcdoffset, &bcdlen, "/boot/bcd");
     if (rc)
     {
-        grub_printf("[VHDTRACE] /boot/bcd not-found rc=%d\n", rc);
+        vhdtrace("/boot/bcd not-found rc=%d\n", rc);
         debug("failed to get bcd location %d\n", rc);
     }
     else
     {
-        grub_printf("[VHDTRACE] /boot/bcd offset=%d len=%d\n", bcdoffset, bcdlen);
+        vhdtrace("/boot/bcd offset=%d len=%d\n", bcdoffset, bcdlen);
         offcnt = ventoy_find_vhdpatch_offset(bcdoffset, bcdlen, patchoffset);
-        grub_printf("[VHDTRACE] /boot/bcd markers=%d off1=0x%x off2=0x%x\n", offcnt, patchoffset[0], patchoffset[1]);
+        vhdtrace("/boot/bcd markers=%d off1=0x%x off2=0x%x\n", offcnt, patchoffset[0], patchoffset[1]);
         if (offcnt < 2)
         {
             debug("invalid /boot/bcd template: only %d patch markers found\n", offcnt);
@@ -367,7 +374,7 @@ grub_err_t ventoy_cmd_patch_vhdboot(grub_extcmd_context_t ctxt, int argc, char *
 
         patch1 = (ventoy_patch_vhd *)(g_vhdboot_isobuf + bcdoffset + patchoffset[0]);
         patch2 = (ventoy_patch_vhd *)(g_vhdboot_isobuf + bcdoffset + patchoffset[1]);
-          grub_printf("[VHDTRACE] /boot/bcd patch1=%p patch2=%p\n", patch1, patch2);
+          vhdtrace("/boot/bcd patch1=%p patch2=%p\n", patch1, patch2);
 
         debug("Find /boot/bcd (%d %d) now patch it (offset: 0x%x 0x%x) ...\n", 
               bcdoffset, bcdlen, patchoffset[0], patchoffset[1]);
@@ -380,14 +387,14 @@ try_upper_bcd:
     rc = ventoy_vhd_find_bcd(&bcdoffset, &bcdlen, "/boot/BCD");
     if (rc)
     {
-        grub_printf("[VHDTRACE] /boot/BCD not-found rc=%d\n", rc);
+        vhdtrace("/boot/BCD not-found rc=%d\n", rc);
         debug("No file /boot/BCD \n");
     }
     else
     {
-        grub_printf("[VHDTRACE] /boot/BCD offset=%d len=%d\n", bcdoffset, bcdlen);
+        vhdtrace("/boot/BCD offset=%d len=%d\n", bcdoffset, bcdlen);
         offcnt = ventoy_find_vhdpatch_offset(bcdoffset, bcdlen, patchoffset);
-        grub_printf("[VHDTRACE] /boot/BCD markers=%d off1=0x%x off2=0x%x\n", offcnt, patchoffset[0], patchoffset[1]);
+        vhdtrace("/boot/BCD markers=%d off1=0x%x off2=0x%x\n", offcnt, patchoffset[0], patchoffset[1]);
         if (offcnt < 2)
         {
             debug("invalid /boot/BCD template: only %d patch markers found\n", offcnt);
@@ -404,7 +411,7 @@ try_upper_bcd:
 
         patch1 = (ventoy_patch_vhd *)(g_vhdboot_isobuf + bcdoffset + patchoffset[0]);
         patch2 = (ventoy_patch_vhd *)(g_vhdboot_isobuf + bcdoffset + patchoffset[1]);
-        grub_printf("[VHDTRACE] /boot/BCD patch1=%p patch2=%p\n", patch1, patch2);
+        vhdtrace("/boot/BCD patch1=%p patch2=%p\n", patch1, patch2);
         
         debug("Find /boot/BCD (%d %d) now patch it (offset: 0x%x 0x%x) ...\n", 
               bcdoffset, bcdlen, patchoffset[0], patchoffset[1]);
@@ -416,23 +423,23 @@ try_upper_bcd:
 end:
     if (!patched)
     {
-        grub_printf("[VHDTRACE] patch end skipped (invalid template)\n");
+        vhdtrace("patch end skipped (invalid template)\n");
         debug("vhd patch skipped due to invalid vhdboot template, keep vtoy_vhd_buf unset\n");
         return 0;
     }
 
     /* set buffer and size */
 #ifdef GRUB_MACHINE_EFI
-    grub_printf("[VHDTRACE] memfile set EFI buf=%p size=%llu\n", g_vhdboot_totbuf,
+    vhdtrace("memfile set EFI buf=%p size=%llu\n", g_vhdboot_totbuf,
                 (ulonglong)(g_vhdboot_isolen + sizeof(ventoy_chain_head)));
     ventoy_memfile_env_set("vtoy_vhd_buf", g_vhdboot_totbuf, (ulonglong)(g_vhdboot_isolen + sizeof(ventoy_chain_head)));
 #else
-    grub_printf("[VHDTRACE] memfile set BIOS buf=%p size=%llu\n", g_vhdboot_isobuf,
+    vhdtrace("memfile set BIOS buf=%p size=%llu\n", g_vhdboot_isobuf,
                 (ulonglong)g_vhdboot_isolen);
     ventoy_memfile_env_set("vtoy_vhd_buf", g_vhdboot_isobuf, (ulonglong)g_vhdboot_isolen);
 #endif
 
-    grub_printf("[VHDTRACE] patch end success\n");
+    vhdtrace("patch end success\n");
 
     VENTOY_CMD_RETURN(GRUB_ERR_NONE);
 }
@@ -445,7 +452,7 @@ grub_err_t ventoy_cmd_load_vhdboot(grub_extcmd_context_t ctxt, int argc, char **
     (void)ctxt;
     (void)argc;
 
-    grub_printf("[VHDTRACE] load begin file=%s old_tot=%p old_iso=%p old_isolen=%d\n",
+    vhdtrace("load begin file=%s old_tot=%p old_iso=%p old_isolen=%d\n",
                 args[0], g_vhdboot_totbuf, g_vhdboot_isobuf, g_vhdboot_isolen);
 
     g_vhdboot_enable = 0;
@@ -458,7 +465,7 @@ grub_err_t ventoy_cmd_load_vhdboot(grub_extcmd_context_t ctxt, int argc, char **
                                (grub_uint64_t) sizeof(ventoy_chain_head);
 
         pages = GRUB_EFI_BYTES_TO_PAGES (oldlen);
-        grub_printf("[VHDTRACE] load free old EFI pages addr=%p pages=%llu oldlen=%llu\n",
+        vhdtrace("load free old EFI pages addr=%p pages=%llu oldlen=%llu\n",
                     g_vhdboot_totbuf, (ulonglong) pages, (ulonglong) oldlen);
         grub_efi_free_pages ((grub_efi_physical_address_t) (grub_addr_t) g_vhdboot_totbuf, pages);
         g_vhdboot_totbuf = NULL;
@@ -474,7 +481,7 @@ grub_err_t ventoy_cmd_load_vhdboot(grub_extcmd_context_t ctxt, int argc, char **
     file = grub_file_open(args[0], VENTOY_FILE_TYPE);
     if (!file)
     {
-        grub_printf("[VHDTRACE] load open failed file=%s\n", args[0]);
+        vhdtrace("load open failed file=%s\n", args[0]);
         return 0;
     }
 
@@ -482,7 +489,7 @@ grub_err_t ventoy_cmd_load_vhdboot(grub_extcmd_context_t ctxt, int argc, char **
 
     if (file->size < VTOY_SIZE_1KB * 32)
     {
-        grub_printf("[VHDTRACE] load rejected small file size=%llu\n", (ulonglong)file->size);
+        vhdtrace("load rejected small file size=%llu\n", (ulonglong)file->size);
         grub_file_close(file);
         return 0;
     }
@@ -499,7 +506,7 @@ grub_err_t ventoy_cmd_load_vhdboot(grub_extcmd_context_t ctxt, int argc, char **
     
     if (!g_vhdboot_totbuf)
     {
-        grub_printf("[VHDTRACE] load alloc failed buflen=%d\n", buflen);
+        vhdtrace("load alloc failed buflen=%d\n", buflen);
         grub_file_close(file);
         return 0;
     }
@@ -510,7 +517,7 @@ grub_err_t ventoy_cmd_load_vhdboot(grub_extcmd_context_t ctxt, int argc, char **
     grub_file_close(file);
 
     g_vhdboot_enable = 1;
-    grub_printf("[VHDTRACE] load ok tot=%p iso=%p isolen=%d buflen=%d\n",
+    vhdtrace("load ok tot=%p iso=%p isolen=%d buflen=%d\n",
                 g_vhdboot_totbuf, g_vhdboot_isobuf, g_vhdboot_isolen, buflen);
 
     return 0;
@@ -597,10 +604,14 @@ grub_err_t ventoy_cmd_get_vtoy_type(grub_extcmd_context_t ctxt, int argc, char *
 
     g_img_trim_head_secnum = 0;
 
+    debug("ventoy_cmd_get_vtoy_type argc=%d\n", argc);
     if (argc != 4)
     {
+        debug("ventoy_cmd_get_vtoy_type invalid argc=%d\n", argc);
         return 0;
     }
+    debug("ventoy_cmd_get_vtoy_type file=<%s> out_type=%s out_part=%s out_alt=%s\n",
+        args[0], args[1], args[2], args[3]);
 
     file = grub_file_open(args[0], VENTOY_FILE_TYPE);
     if (!file)
@@ -608,6 +619,7 @@ grub_err_t ventoy_cmd_get_vtoy_type(grub_extcmd_context_t ctxt, int argc, char *
         debug("Failed to open file %s\n", args[0]);
         return 0;
     }
+    debug("ventoy_cmd_get_vtoy_type file size=%llu\n", (ulonglong)file->size);
 
     grub_snprintf(type, sizeof(type), "unknown");
     
@@ -618,6 +630,7 @@ grub_err_t ventoy_cmd_get_vtoy_type(grub_extcmd_context_t ctxt, int argc, char *
     {
         offset = 0;
         grub_snprintf(type, sizeof(type), "vhd%u", grub_swap_bytes32(vhdfoot.disktype));
+        debug("detected vhd footer disktype=%u\n", grub_swap_bytes32(vhdfoot.disktype));
     }
     else
     {
@@ -647,6 +660,7 @@ grub_err_t ventoy_cmd_get_vtoy_type(grub_extcmd_context_t ctxt, int argc, char *
         {
             offset = 0;
             grub_snprintf(type, sizeof(type), "raw");
+            debug("detected raw image by fallback header check\n");
         }
     }
 
@@ -659,6 +673,7 @@ grub_err_t ventoy_cmd_get_vtoy_type(grub_extcmd_context_t ctxt, int argc, char *
         if (!gpt)
         {
             grub_env_set(args[1], "unknown");
+            debug("failed to alloc ventoy_gpt_info for %s\n", args[0]);
             goto end;
         }
     
@@ -686,6 +701,7 @@ grub_err_t ventoy_cmd_get_vtoy_type(grub_extcmd_context_t ctxt, int argc, char *
                         debug("part %d is grub_bios part\n", i);
                         altboot = 1;
                         grub_env_set(args[3], "1");
+                        debug("set altboot=1 by GPT marker partition\n");
                         break;
                     }
                     else if (gpt->PartTbl[i].LastLBA == 0)
@@ -705,6 +721,7 @@ grub_err_t ventoy_cmd_get_vtoy_type(grub_extcmd_context_t ctxt, int argc, char *
                     {
                         altboot = 1;
                         grub_env_set(args[3], "1");                        
+                        debug("set altboot=1 by legacy boot code marker\n");
                     }
                     else
                     {
@@ -729,6 +746,7 @@ grub_err_t ventoy_cmd_get_vtoy_type(grub_extcmd_context_t ctxt, int argc, char *
                     debug("part %d is esp part in MBR mode\n", i);
                     altboot = 1;
                     grub_env_set(args[3], "1");
+                    debug("set altboot=1 by MBR ESP partition\n");
                     break;
                 }
             }
@@ -738,6 +756,11 @@ grub_err_t ventoy_cmd_get_vtoy_type(grub_extcmd_context_t ctxt, int argc, char *
     {
         debug("part type: %s\n", "xxx");
     }
+    debug("ventoy_cmd_get_vtoy_type result type=%s part=%s alt=%s trim_head=%llu\n",
+        grub_env_get(args[1]) ? grub_env_get(args[1]) : "(null)",
+        grub_env_get(args[2]) ? grub_env_get(args[2]) : "(null)",
+        grub_env_get(args[3]) ? grub_env_get(args[3]) : "(null)",
+        (ulonglong)g_img_trim_head_secnum);
 
 end:
     grub_check_free(gpt);
@@ -747,41 +770,65 @@ end:
 
 grub_err_t ventoy_cmd_raw_chain_data(grub_extcmd_context_t ctxt, int argc, char **args)
 {
+    grub_uint32_t i = 0;
     grub_uint32_t size = 0;
     grub_uint32_t img_chunk_size = 0;
+    grub_uint64_t img_total_sec = 0;
+    grub_uint64_t imgsecs = 0;
+    grub_uint64_t expect_disk_secs = 0;
+    grub_uint64_t cur_disk_secs = 0;
+    grub_uint64_t mapped_img_bytes = 0;
+    grub_uint64_t file_bytes = 0;
     grub_file_t file;
     grub_disk_t disk;
     const char *pLastChain = NULL;
     ventoy_chain_head *chain;
-    
+    ventoy_img_chunk *chain_chunk;
+
     (void)ctxt;
-    (void)argc;
+
+    debug("ventoy_cmd_raw_chain_data argc=%d\n", argc);
+    if (argc < 1 || args[0] == NULL)
+    {
+        debug("ventoy_cmd_raw_chain_data invalid argc=%d\n", argc);
+        return 1;
+    }
+    debug("ventoy_cmd_raw_chain_data input=<%s>\n", args[0]);
 
     if (NULL == g_img_chunk_list.chunk)
     {
         grub_printf("ventoy not ready\n");
+        debug("raw chain failed: g_img_chunk_list.chunk is NULL\n");
         return 1;
     }
+    debug("raw chain chunk_count=%u trim_head=%llu\n", g_img_chunk_list.cur_chunk, (ulonglong)g_img_trim_head_secnum);
 
     if (g_img_trim_head_secnum > 0)
     {
         ventoy_raw_trim_head(g_img_trim_head_secnum);
+        debug("raw chain trimmed head sectors=%llu now chunk_count=%u\n",
+            (ulonglong)g_img_trim_head_secnum, g_img_chunk_list.cur_chunk);
     }
 
     file = ventoy_grub_file_open(VENTOY_FILE_TYPE, "%s", args[0]);
     if (!file)
     {
+        debug("ventoy_grub_file_open failed for %s\n", args[0]);
         return 1;
     }
+    debug("raw chain opened file size=%llu g_iso_path=%s\n",
+        (ulonglong)file->size, g_iso_path[0] ? g_iso_path : "(empty)");
 
     if (grub_strncmp(args[0], g_iso_path, grub_strlen(g_iso_path)))
     {
         ventoy_compat_set_file_vlnk(file, 1);
+        debug("raw chain file treated as vlnk target\n");
     }
 
     img_chunk_size = g_img_chunk_list.cur_chunk * sizeof(ventoy_img_chunk);
     
     size = sizeof(ventoy_chain_head) + img_chunk_size;
+    debug("raw chain alloc size=%u img_chunk_size=%u\n", size, img_chunk_size);
     
     pLastChain = grub_env_get("vtoy_chain_mem_addr");
     if (pLastChain)
@@ -798,9 +845,11 @@ grub_err_t ventoy_cmd_raw_chain_data(grub_extcmd_context_t ctxt, int argc, char 
     if (!chain)
     {
         grub_printf("Failed to alloc chain raw memory size %u\n", size);
+        debug("ventoy_alloc_chain failed size=%u\n", size);
         grub_file_close(file);
         return 1;
     }
+    debug("raw chain buffer=%p\n", chain);
 
     ventoy_memfile_env_set("vtoy_chain_mem", chain, (ulonglong)size);
 
@@ -818,22 +867,77 @@ grub_err_t ventoy_cmd_raw_chain_data(grub_extcmd_context_t ctxt, int argc, char 
     chain->disk_drive = disk->id;
     chain->disk_sector_size = (1 << disk->log_sector_size);
 
-    chain->real_img_size_in_bytes = file->size;
-    if (g_img_trim_head_secnum > 0)
+    file_bytes = file->size;
+    if (g_img_trim_head_secnum > 0 && file_bytes >= g_img_trim_head_secnum * 512)
     {
-        chain->real_img_size_in_bytes -= g_img_trim_head_secnum * 512;
+        file_bytes -= g_img_trim_head_secnum * 512;
     }
-    
-    chain->virt_img_size_in_bytes = chain->real_img_size_in_bytes;
-    chain->boot_catalog = 0;
 
     /* part 3: image chunk */
     chain->img_chunk_offset = sizeof(ventoy_chain_head);
     chain->img_chunk_num = g_img_chunk_list.cur_chunk;
     grub_memcpy((char *)chain + chain->img_chunk_offset, g_img_chunk_list.chunk, img_chunk_size);
+    chain_chunk = (ventoy_img_chunk *)((char *)chain + chain->img_chunk_offset);
+
+    /*
+     * The EFI block-io path reads in 2048-byte units and maps by img_chunk.
+     * Normalize chain chunk disk span to mapped span to avoid exposing
+     * unmapped tail sectors (for example fixed VHD footer 512B).
+     */
+    for (i = 0; i < chain->img_chunk_num; i++)
+    {
+        imgsecs = chain_chunk[i].img_end_sector - chain_chunk[i].img_start_sector + 1;
+        img_total_sec += imgsecs;
+
+        if (chain->disk_sector_size == 512)
+        {
+            expect_disk_secs = imgsecs * 4;
+        }
+        else if (chain->disk_sector_size == 1024)
+        {
+            expect_disk_secs = imgsecs * 2;
+        }
+        else if (chain->disk_sector_size == 2048)
+        {
+            expect_disk_secs = imgsecs;
+        }
+        else if (chain->disk_sector_size == 4096)
+        {
+            expect_disk_secs = (imgsecs + 1) / 2;
+        }
+        else
+        {
+            expect_disk_secs = 0;
+        }
+
+        if (expect_disk_secs > 0)
+        {
+            cur_disk_secs = chain_chunk[i].disk_end_sector - chain_chunk[i].disk_start_sector + 1;
+            if (cur_disk_secs > expect_disk_secs)
+            {
+                debug("raw chain chunk[%u] trim disk sectors %llu -> %llu\n", i,
+                    (ulonglong)cur_disk_secs, (ulonglong)expect_disk_secs);
+                chain_chunk[i].disk_end_sector = chain_chunk[i].disk_start_sector + expect_disk_secs - 1;
+            }
+        }
+    }
+
+    mapped_img_bytes = img_total_sec * 2048ULL;
+
+    chain->real_img_size_in_bytes = mapped_img_bytes;
+    chain->virt_img_size_in_bytes = mapped_img_bytes;
+    chain->boot_catalog = 0;
 
     grub_file_seek(file, g_img_trim_head_secnum * 512);
     grub_file_read(file, chain->boot_catalog_sector, 512);
+    debug("raw chain built drive=0x%x sector_size=%u chunk_num=%u real_size=%llu virt_size=%llu\n",
+        chain->disk_drive, chain->disk_sector_size, chain->img_chunk_num,
+        (ulonglong)chain->real_img_size_in_bytes, (ulonglong)chain->virt_img_size_in_bytes);
+    debug("raw chain size source file_bytes=%llu mapped_img_bytes=%llu img_total_sec=%llu\n",
+        (ulonglong)file_bytes, (ulonglong)mapped_img_bytes, (ulonglong)img_total_sec);
+    debug("raw chain env addr=%s size=%s\n",
+        grub_env_get("vtoy_chain_mem_addr") ? grub_env_get("vtoy_chain_mem_addr") : "(null)",
+        grub_env_get("vtoy_chain_mem_size") ? grub_env_get("vtoy_chain_mem_size") : "(null)");
 
     grub_file_close(file);
     
