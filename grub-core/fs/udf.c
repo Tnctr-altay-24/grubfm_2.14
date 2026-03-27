@@ -30,7 +30,7 @@
 #include <grub/lockdown.h>
 #include <grub/udf.h>
 #include <grub/safemath.h>
-#include <grub/ventoy.h>
+#include <grub/ventoy_data.h>
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
@@ -1467,7 +1467,7 @@ grub_udf_uuid (grub_device_t device, char **uuid)
 }
 
 grub_uint64_t
-grub_udf_get_file_offset (grub_file_t file)
+EXPORT_FUNC (grub_udf_get_file_offset) (grub_file_t file)
 {
   grub_disk_addr_t sector;
   struct grub_fshelp_node *node = (struct grub_fshelp_node *) file->data;
@@ -1477,15 +1477,15 @@ grub_udf_get_file_offset (grub_file_t file)
 }
 
 grub_uint64_t
-grub_udf_get_last_pd_size_offset (void)
+EXPORT_FUNC (grub_udf_get_last_pd_size_offset) (void)
 {
   return g_last_pd_length_offset;
 }
 
 grub_uint64_t
-grub_udf_get_last_file_attr_offset (grub_file_t file,
-                                    grub_uint32_t *startBlock,
-                                    grub_uint64_t *fe_entry_size_offset)
+EXPORT_FUNC (grub_udf_get_last_file_attr_offset) (grub_file_t file,
+						  grub_uint32_t *startBlock,
+						  grub_uint64_t *fe_entry_size_offset)
 {
   grub_uint64_t attr_offset;
   struct grub_fshelp_node *node;

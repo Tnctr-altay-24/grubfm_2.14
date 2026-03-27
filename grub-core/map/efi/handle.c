@@ -32,7 +32,6 @@
 #include <grub/mm.h>
 #include <grub/types.h>
 #include <grub/term.h>
-#include <grub/ventoy.h>
 
 #include <guid.h>
 #include <misc.h>

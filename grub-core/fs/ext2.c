@@ -47,6 +47,7 @@
 #include <grub/types.h>
 #include <grub/fshelp.h>
 #include <grub/safemath.h>
+#include <grub/ventoy_data.h>
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
@@ -353,6 +354,7 @@ struct grub_ext2_data
 };
 
 static grub_dl_t my_mod;
+static int g_ventoy_block_count;
 
 
 
@@ -542,13 +544,14 @@ grub_ext2_read_block (grub_fshelp_node_t node, grub_disk_addr_t fileblock)
 	    ret = 0;
           else
             {
-              grub_disk_addr_t start;
+	              grub_disk_addr_t start;
 
-              start = grub_le_to_cpu16 (ext[i].start_hi);
-              start = (start << 32) + grub_le_to_cpu32 (ext[i].start);
+	              start = grub_le_to_cpu16 (ext[i].start_hi);
+	              start = (start << 32) + grub_le_to_cpu32 (ext[i].start);
+	              g_ventoy_block_count = (int) (grub_le_to_cpu16 (ext[i].len) - fileblock);
 
-              ret = fileblock + start;
-            }
+	              ret = fileblock + start;
+	            }
         }
       else
         {
@@ -1121,6 +1124,56 @@ grub_ext2_mtime (grub_device_t device, grub_int64_t *tm)
 
   return grub_errno;
 
+}
+
+int
+EXPORT_FUNC (grub_ext_get_file_chunk) (grub_uint64_t part_start, grub_file_t file,
+				       ventoy_img_chunk_list *chunk_list)
+{
+  int blocksize;
+  int log2blocksize;
+  grub_disk_t disk;
+  grub_disk_addr_t i = 0;
+  grub_disk_addr_t blockcnt;
+  grub_disk_addr_t blknr;
+  grub_fshelp_node_t node = NULL;
+
+  if (!file || !file->device || !file->device->disk || !file->data
+      || !chunk_list || !chunk_list->chunk)
+    return 1;
+
+  disk = file->device->disk;
+  node = &(((struct grub_ext2_data *) file->data)->diropen);
+
+  log2blocksize = LOG2_EXT2_BLOCK_SIZE (node->data);
+  blocksize = 1 << (log2blocksize + GRUB_DISK_SECTOR_BITS);
+  blockcnt = (file->size + blocksize - 1) >> (log2blocksize + GRUB_DISK_SECTOR_BITS);
+
+  while (i < blockcnt)
+    {
+      g_ventoy_block_count = 1;
+      blknr = grub_ext2_read_block (node, i);
+      if (blknr == 0)
+	return 0;
+      if (blknr == (grub_disk_addr_t) -1)
+	return 1;
+
+      i += (grub_disk_addr_t) g_ventoy_block_count;
+      blknr = blknr << log2blocksize;
+
+      if (grub_disk_blocklist_read (chunk_list, blknr,
+				    (grub_uint64_t) g_ventoy_block_count * blocksize,
+				    disk->log_sector_size) != GRUB_ERR_NONE)
+	return 1;
+    }
+
+  for (i = 0; i < chunk_list->cur_chunk; i++)
+    {
+      chunk_list->chunk[i].disk_start_sector += part_start;
+      chunk_list->chunk[i].disk_end_sector += part_start;
+    }
+
+  return 0;
 }
 
 

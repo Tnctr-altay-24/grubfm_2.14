@@ -41,6 +41,7 @@
 #include <grub/crypto.h>
 #include <grub/diskfilter.h>
 #include <grub/safemath.h>
+#include <grub/ventoy_data.h>
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
@@ -239,6 +240,8 @@ struct grub_btrfs_extent_data
 static grub_disk_addr_t superblock_sectors[] = { 64 * 2, 64 * 1024 * 2,
   256 * 1048576 * 2, 1048576ULL * 1048576ULL * 2
 };
+static grub_uint64_t g_last_chunk_type = 0;
+static grub_uint8_t g_last_compress_type = 0;
 
 static grub_err_t
 grub_btrfs_read_logical (struct grub_btrfs_data *data,
@@ -967,18 +970,21 @@ grub_btrfs_read_logical (struct grub_btrfs_data *data, grub_disk_addr_t addr,
 
 	nstripes = grub_le_to_cpu16 (chunk->nstripes) ? : 1;
 	chunk_stripe_length = grub_le_to_cpu64 (chunk->stripe_length) ? : 512;
-	grub_dprintf ("btrfs", "chunk 0x%" PRIxGRUB_UINT64_T
-		      "+0x%" PRIxGRUB_UINT64_T
-		      " (%d stripes (%d substripes) of %"
-		      PRIxGRUB_UINT64_T ")\n",
-		      grub_le_to_cpu64 (key->offset),
-		      grub_le_to_cpu64 (chunk->size),
-		      nstripes,
-		      grub_le_to_cpu16 (chunk->nsubstripes),
-		      chunk_stripe_length);
+		grub_dprintf ("btrfs", "chunk 0x%" PRIxGRUB_UINT64_T
+			      "+0x%" PRIxGRUB_UINT64_T
+			      " (%d stripes (%d substripes) of %"
+			      PRIxGRUB_UINT64_T ")\n",
+			      grub_le_to_cpu64 (key->offset),
+			      grub_le_to_cpu64 (chunk->size),
+			      nstripes,
+			      grub_le_to_cpu16 (chunk->nsubstripes),
+			      chunk_stripe_length);
 
-	switch (grub_le_to_cpu64 (chunk->type)
-		& ~GRUB_BTRFS_CHUNK_TYPE_BITS_DONTCARE)
+		g_last_chunk_type = grub_le_to_cpu64 (chunk->type)
+		  & ~GRUB_BTRFS_CHUNK_TYPE_BITS_DONTCARE;
+
+		switch (grub_le_to_cpu64 (chunk->type)
+			& ~GRUB_BTRFS_CHUNK_TYPE_BITS_DONTCARE)
 	  {
 	  case GRUB_BTRFS_CHUNK_TYPE_SINGLE:
 	    {
@@ -1619,16 +1625,18 @@ grub_btrfs_extent_read (struct grub_btrfs_data *data,
       if (csize > len)
 	csize = len;
 
-      if (data->extent->encryption)
-	{
-	  grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
-		      "encryption not supported");
-	  return -1;
-	}
+	      if (data->extent->encryption)
+		{
+		  grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
+			      "encryption not supported");
+		  return -1;
+		}
 
-      if (data->extent->compression != GRUB_BTRFS_COMPRESSION_NONE
-	  && data->extent->compression != GRUB_BTRFS_COMPRESSION_ZLIB
-	  && data->extent->compression != GRUB_BTRFS_COMPRESSION_LZO
+	      g_last_compress_type = data->extent->compression;
+
+	      if (data->extent->compression != GRUB_BTRFS_COMPRESSION_NONE
+		  && data->extent->compression != GRUB_BTRFS_COMPRESSION_ZLIB
+		  && data->extent->compression != GRUB_BTRFS_COMPRESSION_LZO
 	  && data->extent->compression != GRUB_BTRFS_COMPRESSION_ZSTD)
 	{
 	  grub_error (GRUB_ERR_NOT_IMPLEMENTED_YET,
@@ -2324,6 +2332,83 @@ grub_btrfs_label (grub_device_t device, char **label)
   grub_btrfs_unmount (data);
 
   return grub_errno;
+}
+
+int
+EXPORT_FUNC (grub_btrfs_get_file_chunk) (grub_uint64_t part_start, grub_file_t file,
+					 ventoy_img_chunk_list *chunk_list)
+{
+  grub_uint32_t i = 0;
+  grub_off_t size = 0;
+  grub_off_t read = 0;
+  grub_disk_t disk = NULL;
+  char *buf = NULL;
+  void *read_hook_data = NULL;
+  grub_disk_read_hook_t read_hook = NULL;
+  struct grub_btrfs_data *data = (struct grub_btrfs_data *) file->data;
+
+  if (!file || !data || !chunk_list || !chunk_list->chunk)
+    return 1;
+
+  if (data->n_devices_attached != 1)
+    {
+      chunk_list->err_code = VTOY_CHUNK_ERR_MULTI_DEV;
+      return 1;
+    }
+
+  buf = grub_malloc (VTOY_CHUNK_BUF_SIZE);
+  if (!buf)
+    return 1;
+
+  /* Trigger read once to capture chunk/compression metadata state.  */
+  grub_file_read (file, buf, 512);
+  grub_file_seek (file, 0);
+
+  if (g_last_chunk_type != GRUB_BTRFS_CHUNK_TYPE_SINGLE)
+    {
+      chunk_list->err_code = VTOY_CHUNK_ERR_RAID;
+      grub_free (buf);
+      return 1;
+    }
+  else if (g_last_compress_type != GRUB_BTRFS_COMPRESSION_NONE)
+    {
+      chunk_list->err_code = VTOY_CHUNK_ERR_COMPRESS;
+      grub_free (buf);
+      return 1;
+    }
+
+  disk = data->devices_attached[0].dev->disk;
+  read_hook = disk->read_hook;
+  read_hook_data = disk->read_hook_data;
+
+  disk->read_hook = (grub_disk_read_hook_t) (void *) grub_disk_blocklist_read2;
+  disk->read_hook_data = chunk_list;
+
+  chunk_list->buf = buf;
+  chunk_list->last_offset = 0;
+  chunk_list->err_code = 0;
+
+  for (size = file->size; size > 0 && chunk_list->err_code == 0; size -= read)
+    {
+      read = (size > VTOY_CHUNK_BUF_SIZE) ? VTOY_CHUNK_BUF_SIZE : size;
+      grub_file_read (file, buf, read);
+    }
+
+  disk->read_hook = read_hook;
+  disk->read_hook_data = read_hook_data;
+
+  chunk_list->buf = NULL;
+  chunk_list->last_offset = 0;
+
+  grub_free (buf);
+
+  for (i = 0; i < chunk_list->cur_chunk; i++)
+    {
+      chunk_list->chunk[i].disk_start_sector += part_start;
+      chunk_list->chunk[i].disk_end_sector += part_start;
+    }
+
+  return 0;
 }
 
 #ifdef GRUB_UTIL

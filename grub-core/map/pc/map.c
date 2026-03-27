@@ -31,9 +31,10 @@
 #include <grub/memory.h>
 #include <grub/machine/memory.h>
 #include <grub/machine/kernel.h>
-#include <grub/ventoy.h>
 
 GRUB_MOD_LICENSE ("GPLv3+");
+
+void grub_ventoy_set_acpi_osparam (const char *filename);
 
 /* Real mode IVT slot (seg:off far pointer) for interrupt 0x13.  */
 static inline grub_uint32_t *

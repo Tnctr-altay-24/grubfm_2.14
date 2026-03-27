@@ -41,6 +41,7 @@
 #include <grub/types.h>
 #include <grub/misc.h>
 #include <grub/file.h>
+#include <grub/ventoy_data.h>
 
 #define GRUB_VENTOY_COMPILE_ASSERT(name, expr) \
   typedef char grub_ventoy_compile_assert_##name[(expr) ? 1 : -1]
@@ -182,27 +183,6 @@ typedef struct
 
 typedef struct
 {
-  grub_uint32_t img_start_sector; // sector size: 2KB
-  grub_uint32_t img_end_sector;   // included
-
-  grub_uint64_t disk_start_sector; // in disk_sector_size
-  grub_uint64_t disk_end_sector;   // included
-} ventoy_img_chunk;
-
-#define DEFAULT_CHUNK_NUM   1024
-
-typedef struct
-{
-  grub_uint32_t max_chunk;
-  grub_uint32_t cur_chunk;
-  grub_uint32_t err_code;
-  grub_uint32_t last_offset;
-  ventoy_img_chunk *chunk;
-  char *buf;
-} ventoy_img_chunk_list;
-
-typedef struct
-{
   grub_uint64_t img_offset;
   grub_uint32_t override_size;
   grub_uint8_t override_data[512];
@@ -270,17 +250,6 @@ typedef struct
 
 enum
 {
-  VTOY_CHUNK_ERR_NONE = 0,
-  VTOY_CHUNK_ERR_MULTI_DEV,
-  VTOY_CHUNK_ERR_RAID,
-  VTOY_CHUNK_ERR_COMPRESS,
-  VTOY_CHUNK_ERR_NOT_FLAT,
-  VTOY_CHUNK_ERR_OVER_FLOW,
-  VTOY_CHUNK_ERR_MAX
-};
-
-enum
-{
   GRUB_FILE_REPLACE_MAGIC = 0x1258BEEFU,
   GRUB_IMG_REPLACE_MAGIC = 0x1259BEEFU
 };
@@ -305,16 +274,8 @@ grub_err_t EXPORT_FUNC(grub_ventoy_build_chain) (grub_file_t file,
                                                  grub_uint8_t iso_format,
                                                  void **buffer,
                                                  grub_size_t *buffer_size);
-int EXPORT_FUNC(grub_fat_get_file_chunk) (grub_uint64_t part_start,
-                                          grub_file_t file,
-                                          ventoy_img_chunk_list *chunk_list);
 grub_uint64_t EXPORT_FUNC(grub_iso9660_get_last_read_pos) (grub_file_t file);
 grub_uint64_t EXPORT_FUNC(grub_iso9660_get_last_file_dirent_pos) (grub_file_t file);
-grub_uint64_t EXPORT_FUNC(grub_udf_get_file_offset) (grub_file_t file);
-grub_uint64_t EXPORT_FUNC(grub_udf_get_last_pd_size_offset) (void);
-grub_uint64_t EXPORT_FUNC(grub_udf_get_last_file_attr_offset) (grub_file_t file,
-                                                               grub_uint32_t *startBlock,
-                                                               grub_uint64_t *fe_entry_size_offset);
 
 GRUB_VENTOY_COMPILE_ASSERT (osparam_size, sizeof (ventoy_os_param) == 512);
 GRUB_VENTOY_COMPILE_ASSERT (secure_data_size, sizeof (ventoy_secure_data) == 4096);

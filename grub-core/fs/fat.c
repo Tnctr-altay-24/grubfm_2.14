@@ -34,7 +34,7 @@
 #endif
 #include <grub/fshelp.h>
 #include <grub/i18n.h>
-#include <grub/ventoy.h>
+#include <grub/ventoy_data.h>
 
 GRUB_MOD_LICENSE ("GPLv3+");
 
@@ -1283,8 +1283,8 @@ grub_disk_addr_t
 
 #ifndef MODE_EXFAT
 int
-grub_fat_get_file_chunk (grub_uint64_t part_start, grub_file_t file,
-                         ventoy_img_chunk_list *chunk_list)
+EXPORT_FUNC (grub_fat_get_file_chunk) (grub_uint64_t part_start, grub_file_t file,
+				       ventoy_img_chunk_list *chunk_list)
 {
   grub_size_t size;
   grub_uint32_t i;

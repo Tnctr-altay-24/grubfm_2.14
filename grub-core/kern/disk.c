@@ -25,6 +25,7 @@
 #include <grub/time.h>
 #include <grub/file.h>
 #include <grub/i18n.h>
+#include <grub/ventoy_data.h>
 
 #define	GRUB_CACHE_TIMEOUT	2
 
@@ -421,11 +422,94 @@ grub_disk_read_small (grub_disk_t disk, grub_disk_addr_t sector,
   err = grub_disk_read_small_real (disk, sector, offset, size, buf);
   if (err)
     return err;
-  if (disk->read_hook)
+  if (disk->read_hook
+      && disk->read_hook != (grub_disk_read_hook_t) (void *) grub_disk_blocklist_read
+      && disk->read_hook != (grub_disk_read_hook_t) (void *) grub_disk_blocklist_read2)
     err = (disk->read_hook) (sector + (offset >> GRUB_DISK_SECTOR_BITS),
 			     offset & (GRUB_DISK_SECTOR_SIZE - 1),
 			     size, buf, disk->read_hook_data);
   return err;
+}
+
+grub_err_t
+grub_disk_blocklist_read (void *chunklist, grub_uint64_t sector,
+			  grub_uint64_t size, grub_uint32_t log_sector_size)
+{
+  grub_uint64_t sizeshift;
+  ventoy_img_chunk *last_chunk = NULL;
+  ventoy_img_chunk *new_chunk = NULL;
+  ventoy_img_chunk_list *chunk_list = (ventoy_img_chunk_list *) chunklist;
+
+  sizeshift = (size >> log_sector_size);
+  if (sizeshift == 0)
+    sizeshift = 1;
+
+  if (chunk_list->cur_chunk == 0)
+    {
+      chunk_list->chunk[0].img_start_sector = 0;
+      chunk_list->chunk[0].img_end_sector = (size >> 11) - 1;
+      chunk_list->chunk[0].disk_start_sector = sector;
+      chunk_list->chunk[0].disk_end_sector = sector + sizeshift - 1;
+      chunk_list->cur_chunk = 1;
+      return GRUB_ERR_NONE;
+    }
+
+  last_chunk = chunk_list->chunk + chunk_list->cur_chunk - 1;
+  if (last_chunk->disk_end_sector + 1 == sector)
+    {
+      last_chunk->img_end_sector += (size >> 11);
+      last_chunk->disk_end_sector += sizeshift;
+      return GRUB_ERR_NONE;
+    }
+
+  if (chunk_list->cur_chunk == chunk_list->max_chunk)
+    {
+      new_chunk = grub_realloc (chunk_list->chunk,
+				chunk_list->max_chunk * 2 * sizeof (ventoy_img_chunk));
+      if (!new_chunk)
+	return GRUB_ERR_OUT_OF_MEMORY;
+
+      chunk_list->chunk = new_chunk;
+      chunk_list->max_chunk *= 2;
+      last_chunk = chunk_list->chunk + chunk_list->cur_chunk - 1;
+    }
+
+  new_chunk = chunk_list->chunk + chunk_list->cur_chunk;
+  new_chunk->img_start_sector = last_chunk->img_end_sector + 1;
+  new_chunk->img_end_sector = new_chunk->img_start_sector + (size >> 11) - 1;
+  new_chunk->disk_start_sector = sector;
+  new_chunk->disk_end_sector = sector + sizeshift - 1;
+
+  chunk_list->cur_chunk++;
+  return GRUB_ERR_NONE;
+}
+
+grub_err_t
+grub_disk_blocklist_read2 (grub_disk_t disk, grub_uint64_t sector,
+			   grub_uint64_t size, char *buf)
+{
+  ventoy_img_chunk_list *chunk_list = (ventoy_img_chunk_list *) disk->read_hook_data;
+
+  if (buf < chunk_list->buf || buf >= chunk_list->buf + VTOY_CHUNK_BUF_SIZE)
+    return 2;
+
+  if ((chunk_list->buf + chunk_list->last_offset) != buf)
+    {
+      chunk_list->err_code = VTOY_CHUNK_ERR_NOT_FLAT;
+      return GRUB_ERR_NONE;
+    }
+
+  if (chunk_list->last_offset + size > VTOY_CHUNK_BUF_SIZE)
+    {
+      chunk_list->err_code = VTOY_CHUNK_ERR_OVER_FLOW;
+      return GRUB_ERR_NONE;
+    }
+
+  chunk_list->last_offset += (grub_uint32_t) size;
+  if (chunk_list->last_offset == VTOY_CHUNK_BUF_SIZE)
+    chunk_list->last_offset = 0;
+
+  return grub_disk_blocklist_read (chunk_list, sector, size, disk->log_sector_size);
 }
 
 /* Read data from the disk.  */
@@ -434,6 +518,16 @@ grub_disk_read (grub_disk_t disk, grub_disk_addr_t sector,
 		grub_off_t offset, grub_size_t size, void *buf)
 {
   grub_err_t err = GRUB_ERR_NONE;
+
+  if (disk->read_hook == (grub_disk_read_hook_t) (void *) grub_disk_blocklist_read)
+    return grub_disk_blocklist_read ((ventoy_img_chunk_list *) disk->read_hook_data,
+				     sector, size, disk->log_sector_size);
+  else if (disk->read_hook == (grub_disk_read_hook_t) (void *) grub_disk_blocklist_read2)
+    {
+      grub_err_t rv = grub_disk_blocklist_read2 (disk, sector, size, (char *) buf);
+      if (rv != 2)
+	return rv;
+    }
 
   /* First of all, check if the region is within the disk.  */
   if (grub_disk_adjust_range (disk, &sector, &offset, size) != GRUB_ERR_NONE)
@@ -525,7 +619,9 @@ grub_disk_read (grub_disk_t disk, grub_disk_addr_t sector,
 					    + GRUB_DISK_SECTOR_BITS)));
 
 
-	  if (disk->read_hook)
+	  if (disk->read_hook
+	      && disk->read_hook != (grub_disk_read_hook_t) (void *) grub_disk_blocklist_read
+	      && disk->read_hook != (grub_disk_read_hook_t) (void *) grub_disk_blocklist_read2)
 	    (disk->read_hook) (sector, 0, agglomerate << (GRUB_DISK_CACHE_BITS + GRUB_DISK_SECTOR_BITS),
 			       buf, disk->read_hook_data);
 
@@ -537,7 +633,9 @@ grub_disk_read (grub_disk_t disk, grub_disk_addr_t sector,
 
       if (data)
 	{
-	  if (disk->read_hook)
+	  if (disk->read_hook
+	      && disk->read_hook != (grub_disk_read_hook_t) (void *) grub_disk_blocklist_read
+	      && disk->read_hook != (grub_disk_read_hook_t) (void *) grub_disk_blocklist_read2)
 	    (disk->read_hook) (sector, 0, (GRUB_DISK_CACHE_SIZE << GRUB_DISK_SECTOR_BITS),
 			       buf, disk->read_hook_data);
 	  sector += GRUB_DISK_CACHE_SIZE;

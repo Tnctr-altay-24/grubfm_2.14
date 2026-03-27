@@ -3373,6 +3373,8 @@ int ventoy_get_block_list(grub_file_t file, ventoy_img_chunk_list *chunklist, gr
     grub_uint32_t i = 0;
     grub_uint32_t sector = 0;
     grub_uint32_t count = 0;
+    grub_off_t size = 0;
+    grub_off_t read = 0;
 
     fs_type = ventoy_get_fs_type(file->fs->name);
     if (fs_type == ventoy_fs_exfat || fs_type == ventoy_fs_fat)
@@ -3381,15 +3383,28 @@ int ventoy_get_block_list(grub_file_t file, ventoy_img_chunk_list *chunklist, gr
     }
     else if (fs_type == ventoy_fs_ext)
     {
-        ventoy_compat_get_file_chunk(start, file, chunklist);
+        grub_ext_get_file_chunk(start, file, chunklist);
     }
     else if (fs_type == ventoy_fs_btrfs)
     {
-        ventoy_compat_get_file_chunk(start, file, chunklist);
+        grub_btrfs_get_file_chunk(start, file, chunklist);
     }
     else
     {
-        ventoy_compat_get_file_chunk(start, file, chunklist);
+        file->read_hook = (grub_disk_read_hook_t)(void *)grub_disk_blocklist_read;
+        file->read_hook_data = chunklist;
+
+        for (size = file->size; size > 0; size -= read)
+        {
+            read = (size > VTOY_SIZE_1GB) ? VTOY_SIZE_1GB : size;
+            grub_file_read(file, NULL, read);
+        }
+
+        for (i = 0; start > 0 && i < chunklist->cur_chunk; i++)
+        {
+            chunklist->chunk[i].disk_start_sector += start;
+            chunklist->chunk[i].disk_end_sector += start;
+        }
 
         if (ventoy_fs_udf == fs_type)
         {

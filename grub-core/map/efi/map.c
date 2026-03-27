@@ -32,7 +32,6 @@
 #include <grub/mm.h>
 #include <grub/types.h>
 #include <grub/term.h>
-#include <grub/ventoy.h>
 
 #include <iso.h>
 #include <guid.h>
@@ -40,6 +39,9 @@
 #include <grub4dos.h>
 
 GRUB_MOD_LICENSE ("GPLv3+");
+
+void grub_ventoy_set_osparam (const char *filename);
+void grub_ventoy_set_acpi_osparam (const char *filename);
 
 static unsigned int last_id = 0;
 static grub_efi_handle_t boot_image_handle = 0;
