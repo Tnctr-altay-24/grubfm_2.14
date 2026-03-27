@@ -114,8 +114,13 @@ grub_loopback_raw_close (grub_file_t file)
 {
   if (!file)
     return;
-  if (grub_loopback_file_is_mem_name (file->name) && file->data)
-    grub_free (file->data);
+
+  /*
+   * For mem: pointers, ownership is not guaranteed to belong to grub_malloc.
+   * Some callers pass externally managed buffers (e.g. EFI page buffers for
+   * Ventoy chain data). Freeing them via grub_free can crash with
+   * "unaligned pointer"/"out of range pointer" fatals.
+   */
   grub_file_close (file);
 }
 

@@ -311,14 +311,16 @@ static int ventoy_find_vhdpatch_offset(int bcdoffset, int bcdlen, int *offset)
         }
     }
 
-    return 0;
+    return cnt;
 }
 
 grub_err_t ventoy_cmd_patch_vhdboot(grub_extcmd_context_t ctxt, int argc, char **args)
 {
     int rc;
+    int offcnt;
+    int patched = 0;
     int bcdoffset, bcdlen;
-    int patchoffset[2];
+    int patchoffset[2] = {0};
     ventoy_patch_vhd *patch1;
     ventoy_patch_vhd *patch2;
 
@@ -327,10 +329,13 @@ grub_err_t ventoy_cmd_patch_vhdboot(grub_extcmd_context_t ctxt, int argc, char *
 
     grub_env_unset("vtoy_vhd_buf_addr");
 
+    grub_printf("[VHDTRACE] patch begin arg=%s enable=%d tot=%p iso=%p isolen=%d\n",
+                args[0], g_vhdboot_enable, g_vhdboot_totbuf, g_vhdboot_isobuf, g_vhdboot_isolen);
     debug("patch vhd <%s>\n", args[0]);
 
     if ((!g_vhdboot_enable) || (!g_vhdboot_totbuf))
     {
+        grub_printf("[VHDTRACE] patch skip not-ready enable=%d tot=%p\n", g_vhdboot_enable, g_vhdboot_totbuf);
         debug("vhd boot not ready %d %p\n", g_vhdboot_enable, g_vhdboot_totbuf);
         return 0;
     }
@@ -338,43 +343,96 @@ grub_err_t ventoy_cmd_patch_vhdboot(grub_extcmd_context_t ctxt, int argc, char *
     rc = ventoy_vhd_find_bcd(&bcdoffset, &bcdlen, "/boot/bcd");
     if (rc)
     {
+        grub_printf("[VHDTRACE] /boot/bcd not-found rc=%d\n", rc);
         debug("failed to get bcd location %d\n", rc);
     }
     else
     {
-        ventoy_find_vhdpatch_offset(bcdoffset, bcdlen, patchoffset);
+        grub_printf("[VHDTRACE] /boot/bcd offset=%d len=%d\n", bcdoffset, bcdlen);
+        offcnt = ventoy_find_vhdpatch_offset(bcdoffset, bcdlen, patchoffset);
+        grub_printf("[VHDTRACE] /boot/bcd markers=%d off1=0x%x off2=0x%x\n", offcnt, patchoffset[0], patchoffset[1]);
+        if (offcnt < 2)
+        {
+            debug("invalid /boot/bcd template: only %d patch markers found\n", offcnt);
+            goto try_upper_bcd;
+        }
+
+        if (patchoffset[0] < 0 || patchoffset[1] < 0 ||
+            patchoffset[0] + (int)sizeof(ventoy_patch_vhd) > bcdlen ||
+            patchoffset[1] + (int)sizeof(ventoy_patch_vhd) > bcdlen)
+        {
+            debug("invalid /boot/bcd patch offset: 0x%x 0x%x bcdlen=%d\n", patchoffset[0], patchoffset[1], bcdlen);
+            goto try_upper_bcd;
+        }
+
         patch1 = (ventoy_patch_vhd *)(g_vhdboot_isobuf + bcdoffset + patchoffset[0]);
         patch2 = (ventoy_patch_vhd *)(g_vhdboot_isobuf + bcdoffset + patchoffset[1]);
+          grub_printf("[VHDTRACE] /boot/bcd patch1=%p patch2=%p\n", patch1, patch2);
 
         debug("Find /boot/bcd (%d %d) now patch it (offset: 0x%x 0x%x) ...\n", 
               bcdoffset, bcdlen, patchoffset[0], patchoffset[1]);
         ventoy_vhd_patch_disk(args[0], patch1, patch2);
         ventoy_vhd_patch_path(args[0], patch1, patch2, bcdoffset, bcdlen);
+        patched = 1;
     }
 
+try_upper_bcd:
     rc = ventoy_vhd_find_bcd(&bcdoffset, &bcdlen, "/boot/BCD");
     if (rc)
     {
+        grub_printf("[VHDTRACE] /boot/BCD not-found rc=%d\n", rc);
         debug("No file /boot/BCD \n");
     }
     else
     {
-        ventoy_find_vhdpatch_offset(bcdoffset, bcdlen, patchoffset);
+        grub_printf("[VHDTRACE] /boot/BCD offset=%d len=%d\n", bcdoffset, bcdlen);
+        offcnt = ventoy_find_vhdpatch_offset(bcdoffset, bcdlen, patchoffset);
+        grub_printf("[VHDTRACE] /boot/BCD markers=%d off1=0x%x off2=0x%x\n", offcnt, patchoffset[0], patchoffset[1]);
+        if (offcnt < 2)
+        {
+            debug("invalid /boot/BCD template: only %d patch markers found\n", offcnt);
+            goto end;
+        }
+
+        if (patchoffset[0] < 0 || patchoffset[1] < 0 ||
+            patchoffset[0] + (int)sizeof(ventoy_patch_vhd) > bcdlen ||
+            patchoffset[1] + (int)sizeof(ventoy_patch_vhd) > bcdlen)
+        {
+            debug("invalid /boot/BCD patch offset: 0x%x 0x%x bcdlen=%d\n", patchoffset[0], patchoffset[1], bcdlen);
+            goto end;
+        }
+
         patch1 = (ventoy_patch_vhd *)(g_vhdboot_isobuf + bcdoffset + patchoffset[0]);
         patch2 = (ventoy_patch_vhd *)(g_vhdboot_isobuf + bcdoffset + patchoffset[1]);
+        grub_printf("[VHDTRACE] /boot/BCD patch1=%p patch2=%p\n", patch1, patch2);
         
         debug("Find /boot/BCD (%d %d) now patch it (offset: 0x%x 0x%x) ...\n", 
               bcdoffset, bcdlen, patchoffset[0], patchoffset[1]);
         ventoy_vhd_patch_disk(args[0], patch1, patch2);
         ventoy_vhd_patch_path(args[0], patch1, patch2, bcdoffset, bcdlen);
+        patched = 1;
+    }
+
+end:
+    if (!patched)
+    {
+        grub_printf("[VHDTRACE] patch end skipped (invalid template)\n");
+        debug("vhd patch skipped due to invalid vhdboot template, keep vtoy_vhd_buf unset\n");
+        return 0;
     }
 
     /* set buffer and size */
 #ifdef GRUB_MACHINE_EFI
+    grub_printf("[VHDTRACE] memfile set EFI buf=%p size=%llu\n", g_vhdboot_totbuf,
+                (ulonglong)(g_vhdboot_isolen + sizeof(ventoy_chain_head)));
     ventoy_memfile_env_set("vtoy_vhd_buf", g_vhdboot_totbuf, (ulonglong)(g_vhdboot_isolen + sizeof(ventoy_chain_head)));
 #else
+    grub_printf("[VHDTRACE] memfile set BIOS buf=%p size=%llu\n", g_vhdboot_isobuf,
+                (ulonglong)g_vhdboot_isolen);
     ventoy_memfile_env_set("vtoy_vhd_buf", g_vhdboot_isobuf, (ulonglong)g_vhdboot_isolen);
 #endif
+
+    grub_printf("[VHDTRACE] patch end success\n");
 
     VENTOY_CMD_RETURN(GRUB_ERR_NONE);
 }
@@ -387,12 +445,36 @@ grub_err_t ventoy_cmd_load_vhdboot(grub_extcmd_context_t ctxt, int argc, char **
     (void)ctxt;
     (void)argc;
 
+    grub_printf("[VHDTRACE] load begin file=%s old_tot=%p old_iso=%p old_isolen=%d\n",
+                args[0], g_vhdboot_totbuf, g_vhdboot_isobuf, g_vhdboot_isolen);
+
     g_vhdboot_enable = 0;
+#ifdef GRUB_MACHINE_EFI
+    if (g_vhdboot_totbuf)
+    {
+        grub_efi_uintn_t pages;
+        grub_uint64_t oldlen = (g_vhdboot_isolen > 0) ?
+                               ((grub_uint64_t) g_vhdboot_isolen + sizeof(ventoy_chain_head)) :
+                               (grub_uint64_t) sizeof(ventoy_chain_head);
+
+        pages = GRUB_EFI_BYTES_TO_PAGES (oldlen);
+        grub_printf("[VHDTRACE] load free old EFI pages addr=%p pages=%llu oldlen=%llu\n",
+                    g_vhdboot_totbuf, (ulonglong) pages, (ulonglong) oldlen);
+        grub_efi_free_pages ((grub_efi_physical_address_t) (grub_addr_t) g_vhdboot_totbuf, pages);
+        g_vhdboot_totbuf = NULL;
+        g_vhdboot_isobuf = NULL;
+        g_vhdboot_isolen = 0;
+    }
+#else
     grub_check_free(g_vhdboot_totbuf);
+    g_vhdboot_isobuf = NULL;
+    g_vhdboot_isolen = 0;
+#endif
 
     file = grub_file_open(args[0], VENTOY_FILE_TYPE);
     if (!file)
     {
+        grub_printf("[VHDTRACE] load open failed file=%s\n", args[0]);
         return 0;
     }
 
@@ -400,6 +482,7 @@ grub_err_t ventoy_cmd_load_vhdboot(grub_extcmd_context_t ctxt, int argc, char **
 
     if (file->size < VTOY_SIZE_1KB * 32)
     {
+        grub_printf("[VHDTRACE] load rejected small file size=%llu\n", (ulonglong)file->size);
         grub_file_close(file);
         return 0;
     }
@@ -416,6 +499,7 @@ grub_err_t ventoy_cmd_load_vhdboot(grub_extcmd_context_t ctxt, int argc, char **
     
     if (!g_vhdboot_totbuf)
     {
+        grub_printf("[VHDTRACE] load alloc failed buflen=%d\n", buflen);
         grub_file_close(file);
         return 0;
     }
@@ -426,6 +510,8 @@ grub_err_t ventoy_cmd_load_vhdboot(grub_extcmd_context_t ctxt, int argc, char **
     grub_file_close(file);
 
     g_vhdboot_enable = 1;
+    grub_printf("[VHDTRACE] load ok tot=%p iso=%p isolen=%d buflen=%d\n",
+                g_vhdboot_totbuf, g_vhdboot_isobuf, g_vhdboot_isolen, buflen);
 
     return 0;
 }
