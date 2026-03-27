@@ -28,6 +28,7 @@
 #include <grub/i18n.h>
 #include <grub/safemath.h>
 
+#include <argon2.h>
 #include <base64.h>
 #include <json.h>
 

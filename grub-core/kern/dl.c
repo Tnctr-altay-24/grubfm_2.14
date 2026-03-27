@@ -495,7 +495,8 @@ grub_dl_check_license (grub_dl_t mod, Elf_Ehdr *e)
 
   if (grub_strcmp ((char *) e + s->sh_offset, "LICENSE=GPLv3") == 0
       || grub_strcmp ((char *) e + s->sh_offset, "LICENSE=GPLv3+") == 0
-      || grub_strcmp ((char *) e + s->sh_offset, "LICENSE=GPLv2+") == 0)
+      || grub_strcmp ((char *) e + s->sh_offset, "LICENSE=GPLv2+") == 0
+      || grub_strcmp ((char *) e + s->sh_offset, "LICENSE=CC0") == 0)
     return GRUB_ERR_NONE;
 
   return grub_error (GRUB_ERR_BAD_MODULE,

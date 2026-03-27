@@ -236,7 +236,8 @@ check_license (const char * const filename,
   Elf_Shdr *s = find_section (arch, e, ".module_license", module_size);
   if (s && (strcmp ((char *) e + grub_target_to_host(s->sh_offset), "LICENSE=GPLv3") == 0
 	    || strcmp ((char *) e + grub_target_to_host(s->sh_offset), "LICENSE=GPLv3+") == 0
-	    || strcmp ((char *) e + grub_target_to_host(s->sh_offset), "LICENSE=GPLv2+") == 0))
+	    || strcmp ((char *) e + grub_target_to_host(s->sh_offset), "LICENSE=GPLv2+") == 0
+	    || strcmp ((char *) e + grub_target_to_host(s->sh_offset), "LICENSE=CC0") == 0))
     return;
   grub_util_error ("%s: incompatible license", filename);
 }

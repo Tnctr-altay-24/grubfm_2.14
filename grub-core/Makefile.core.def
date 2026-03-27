@@ -1534,6 +1534,14 @@ module = {
 };
 
 module = {
+  name = argon2_ref;
+  common = lib/argon2/argon2.c;
+  common = lib/argon2/core.c;
+  common = lib/argon2/ref.c;
+  common = lib/argon2/blake2/blake2b.c;
+};
+
+module = {
   name = afsplitter;
   common = disk/AFSplitter.c;
 };
@@ -1548,7 +1556,7 @@ module = {
   common = disk/luks2.c;
   common = lib/gnulib/base64.c;
   cflags = '$(CFLAGS_POSIX) $(CFLAGS_GNULIB)';
-  cppflags = '$(CPPFLAGS_POSIX) $(CPPFLAGS_GNULIB) -I$(srcdir)/lib/json';
+  cppflags = '$(CPPFLAGS_POSIX) $(CPPFLAGS_GNULIB) -I$(srcdir)/lib/json -I$(srcdir)/lib/argon2';
 };
 
 module = {
