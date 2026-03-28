@@ -173,6 +173,20 @@ static char g_json_case_mis_path[32];
 
 static ventoy_vlnk_part *g_vlnk_part_list = NULL;
 
+static void
+ventoy_store_u32_unaligned (void *dst, grub_uint32_t value)
+{
+    grub_memcpy (dst, &value, sizeof (value));
+}
+
+static grub_uint32_t
+ventoy_load_u32_unaligned (const void *src)
+{
+    grub_uint32_t value;
+    grub_memcpy (&value, src, sizeof (value));
+    return value;
+}
+
 static int ventoy_diag_enabled(void)
 {
     const char *diag = grub_env_get("vtoy_diag");
@@ -843,8 +857,8 @@ int ventoy_gzip_compress(void *mem_in, int mem_in_len, void *mem_out, int mem_ou
     mz_deflateEnd(&s);
 
     outbuf += s.total_out;
-    *(grub_uint32_t *)outbuf = grub_getcrc32c(0, outbuf, s.total_out);
-    *(grub_uint32_t *)(outbuf + 4) = (grub_uint32_t)(s.total_out);
+    ventoy_store_u32_unaligned(outbuf, grub_getcrc32c(0, outbuf, s.total_out));
+    ventoy_store_u32_unaligned(outbuf + 4, (grub_uint32_t)(s.total_out));
 
     return s.total_out + sizeof(gzHdr) + 8;    
 }
@@ -2201,8 +2215,7 @@ int ventoy_fill_data(grub_uint32_t buflen, char *buffer)
     const char *fmt1 = NULL;
     const char *fmt2 = NULL;
     const char *fmt3 = NULL;    
-    grub_uint32_t *puint = (grub_uint32_t *)name;
-    grub_uint32_t *puint2 = (grub_uint32_t *)plat;
+    grub_uint32_t plat_data = 0;
     const char fmtdata[]={ 0x39, 0x35, 0x25, 0x00, 0x35, 0x00, 0x23, 0x30, 0x30, 0x30, 0x30, 0x66, 0x66, 0x00 };
     const char fmtcode[]={
         0x22, 0x0A, 0x2B, 0x20, 0x68, 0x62, 0x6F, 0x78, 0x20, 0x7B, 0x0A, 0x20, 0x20, 0x74, 0x6F, 0x70,
@@ -2214,15 +2227,11 @@ int ventoy_fill_data(grub_uint32_t buflen, char *buffer)
     };
 
     grub_memset(name, 0, sizeof(name));
-    puint[0] = grub_swap_bytes32(0x56454e54);
-    puint[3] = grub_swap_bytes32(0x4f4e0000);
-    puint[2] = grub_swap_bytes32(0x45525349);
-    puint[1] = grub_swap_bytes32(0x4f595f56);
+    grub_strcpy(name, "VENTOY_VERSION");
     value = ventoy_get_env(name);
 
     grub_memset(name, 0, sizeof(name));
-    puint[1] = grub_swap_bytes32(0x5f544f50);
-    puint[0] = grub_swap_bytes32(0x56544c45);
+    grub_strcpy(name, "VTLE_TOP");
     fmt1 = ventoy_get_env(name);
     if (!fmt1)
     {
@@ -2230,18 +2239,17 @@ int ventoy_fill_data(grub_uint32_t buflen, char *buffer)
     }
     
     grub_memset(name, 0, sizeof(name));
-    puint[1] = grub_swap_bytes32(0x5f4c4654);
-    puint[0] = grub_swap_bytes32(0x56544c45);
+    grub_strcpy(name, "VTLE_LFT");
     fmt2 = ventoy_get_env(name);
     
     grub_memset(name, 0, sizeof(name));
-    puint[1] = grub_swap_bytes32(0x5f434c52);
-    puint[0] = grub_swap_bytes32(0x56544c45);
+    grub_strcpy(name, "VTLE_CLR");
     fmt3 = ventoy_get_env(name);
 
     grub_memcpy(guidstr, &guid, sizeof(guid));
 
-    puint2[0] = grub_swap_bytes32(g_ventoy_plat_data);    
+    plat_data = grub_swap_bytes32(g_ventoy_plat_data);
+    grub_memcpy(plat, &plat_data, sizeof(plat_data));
 
     /* Easter egg :) It will be appreciated if you reserve it, but NOT mandatory. */
     #pragma GCC diagnostic push
@@ -2254,9 +2262,7 @@ int ventoy_fill_data(grub_uint32_t buflen, char *buffer)
     #pragma GCC diagnostic pop
 
     grub_memset(name, 0, sizeof(name));
-    puint[0] = grub_swap_bytes32(0x76746f79);
-    puint[2] = grub_swap_bytes32(0x656e7365);
-    puint[1] = grub_swap_bytes32(0x5f6c6963);
+    grub_strcpy(name, "vtoy_license");
     ventoy_set_env(name, guidstr);
 
     return len;
@@ -3157,7 +3163,7 @@ static grub_uint32_t ventoy_get_bios_eltorito_rba(grub_file_t file, grub_uint32_
     if (buf[0] == 0x01 && buf[1] == 0x00 && 
         buf[30] == 0x55 && buf[31] == 0xaa && buf[32] == 0x88)
     {
-        return *((grub_uint32_t *)(buf + 40));
+        return ventoy_load_u32_unaligned(buf + 40);
     }
 
     return 0;
@@ -4896,7 +4902,8 @@ static grub_err_t ventoy_cmd_acpi_param(grub_extcmd_context_t ctxt, int argc, ch
     int image_sector_size;
     char cmd[64];
     ventoy_chain_head *chain;
-    ventoy_img_chunk *chunk;
+    grub_uint8_t *chunk_buf;
+    ventoy_img_chunk chunk_entry;
     ventoy_os_param *osparam;
     ventoy_image_location *location;
     ventoy_image_disk_region *region;
@@ -4962,27 +4969,27 @@ static grub_err_t ventoy_cmd_acpi_param(grub_extcmd_context_t ctxt, int argc, ch
     location->region_count = img_chunk_num;
 
     region = location->regions;
-    chunk = (ventoy_img_chunk *)((char *)chain + chain->img_chunk_offset);
+    chunk_buf = (grub_uint8_t *)chain + chain->img_chunk_offset;
     if (512 == image_sector_size)
     {
         for (i = 0; i < img_chunk_num; i++)
         {
-            region->image_sector_count = chunk->disk_end_sector - chunk->disk_start_sector + 1;
-            region->image_start_sector = chunk->img_start_sector * 4;
-            region->disk_start_sector  = chunk->disk_start_sector;
+            grub_memcpy(&chunk_entry, chunk_buf + i * sizeof(ventoy_img_chunk), sizeof(chunk_entry));
+            region->image_sector_count = chunk_entry.disk_end_sector - chunk_entry.disk_start_sector + 1;
+            region->image_start_sector = chunk_entry.img_start_sector * 4;
+            region->disk_start_sector  = chunk_entry.disk_start_sector;
             region++;
-            chunk++;
         }
     }
     else
     {
         for (i = 0; i < img_chunk_num; i++)
         {
-            region->image_sector_count = chunk->img_end_sector - chunk->img_start_sector + 1;
-            region->image_start_sector = chunk->img_start_sector;
-            region->disk_start_sector  = chunk->disk_start_sector;        
+            grub_memcpy(&chunk_entry, chunk_buf + i * sizeof(ventoy_img_chunk), sizeof(chunk_entry));
+            region->image_sector_count = chunk_entry.img_end_sector - chunk_entry.img_start_sector + 1;
+            region->image_start_sector = chunk_entry.img_start_sector;
+            region->disk_start_sector  = chunk_entry.disk_start_sector;
             region++;
-            chunk++;
         }
     }
 
@@ -5614,7 +5621,7 @@ static grub_err_t ventoy_cmd_get_efivdisk_offset(grub_extcmd_context_t ctxt, int
         {
             if (buf[i + 32] == 0x88)
             {
-                loadsector = *(grub_uint32_t *)(buf + i + 32 + 8);
+                loadsector = ventoy_load_u32_unaligned(buf + i + 32 + 8);
                 grub_snprintf(value, sizeof(value), "%u", loadsector * 4); //change to sector size 512
                 break;
             }

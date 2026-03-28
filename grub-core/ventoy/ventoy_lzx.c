@@ -50,14 +50,15 @@ static unsigned int lzx_position_base[LZX_POSITION_SLOTS];
  * before using the value.
  */
 static int lzx_accumulate ( struct lzx *lzx, unsigned int bits ) {
-	const uint16_t *src16;
+	uint16_t src16;
 
 	/* Accumulate more bits if required */
 	if ( ( lzx->bits < bits ) &&
 	     ( lzx->input.offset < lzx->input.len ) ) {
-		src16 = (const uint16_t *)( ( char * ) lzx->input.data + lzx->input.offset );
-		lzx->input.offset += sizeof ( *src16 );
-		lzx->accumulator |= ( *src16 << ( 16 - lzx->bits ) );
+		memcpy ( &src16, ( ( char * ) lzx->input.data + lzx->input.offset ),
+			 sizeof ( src16 ) );
+		lzx->input.offset += sizeof ( src16 );
+		lzx->accumulator |= ( src16 << ( 16 - lzx->bits ) );
 		lzx->bits += 16;
 	}
 
@@ -574,7 +575,7 @@ static int lzx_token ( struct lzx *lzx ) {
  */
 static void lzx_translate_jumps ( struct lzx *lzx ) {
 	size_t offset;
-	int32_t *target;
+	int32_t target;
 
 	/* Sanity check */
 	if ( lzx->output.offset < 10 )
@@ -588,15 +589,16 @@ static void lzx_translate_jumps ( struct lzx *lzx ) {
 			continue;
 
 		/* Translate jump target */
-		target = ( ( int32_t * ) &lzx->output.data[ offset + 1 ] );
-		if ( *target >= 0 ) {
-			if ( *target < LZX_WIM_MAGIC_FILESIZE )
-				*target -= offset;
+		memcpy ( &target, &lzx->output.data[ offset + 1 ], sizeof ( target ) );
+		if ( target >= 0 ) {
+			if ( target < LZX_WIM_MAGIC_FILESIZE )
+				target -= offset;
 		} else {
-			if ( *target >= -( ( int32_t ) offset ) )
-				*target += LZX_WIM_MAGIC_FILESIZE;
+			if ( target >= -( ( int32_t ) offset ) )
+				target += LZX_WIM_MAGIC_FILESIZE;
 		}
-		offset += sizeof ( *target );
+		memcpy ( &lzx->output.data[ offset + 1 ], &target, sizeof ( target ) );
+		offset += sizeof ( target );
 	}
 }
 

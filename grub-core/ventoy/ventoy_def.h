@@ -34,6 +34,11 @@
 
 #include "ventoy_vfat.h"
 
+/* Ventoy parsers intentionally read packed/on-disk layouts via raw pointers. */
+#if defined(__GNUC__)
+#pragma GCC diagnostic ignored "-Wcast-align"
+#endif
+
 typedef grub_packed_guid_t ventoy_guid;
 
 #define VTOY_MAX_DIR_DEPTH  32
