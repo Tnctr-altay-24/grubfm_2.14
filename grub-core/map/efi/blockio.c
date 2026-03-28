@@ -25,7 +25,18 @@
 #include <misc.h>
 #include <stddef.h>
 
-#define VDISK_BLOCKIO_TO_PARENT(a) CR(a, grub_efivdisk_t, block_io)
+static grub_efivdisk_t *
+vdisk_blockio_to_parent (block_io_protocol_t *io)
+{
+  union
+  {
+    char *raw;
+    grub_efivdisk_t *parent;
+  } ptr;
+
+  ptr.raw = (char *) io - offsetof (grub_efivdisk_t, block_io);
+  return ptr.parent;
+}
 
 static grub_efi_status_t EFIAPI
 blockio_reset (block_io_protocol_t *this __unused,
@@ -47,7 +58,7 @@ blockio_read (block_io_protocol_t *this, grub_efi_uint32_t media_id,
   if (!len)
     return GRUB_EFI_SUCCESS;
 
-  data = VDISK_BLOCKIO_TO_PARENT(this);
+  data = vdisk_blockio_to_parent (this);
 
   /* wimboot */
   if (data->media.media_id == VDISK_MBR_SIGNATURE)
@@ -90,7 +101,7 @@ blockio_write (block_io_protocol_t *this,
   if (!len)
     return GRUB_EFI_SUCCESS;
 
-  data = VDISK_BLOCKIO_TO_PARENT(this);
+  data = vdisk_blockio_to_parent (this);
 
   /* wimboot */
   if (data->media.media_id == VDISK_MBR_SIGNATURE || data->media.read_only)
