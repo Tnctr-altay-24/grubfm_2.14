@@ -37,10 +37,12 @@
 #define efi_call_6(func, a, b, c, d, e, f)              (func)(a, b, c, d, e, f)
 #endif
 
-#define INSYDE_SETUP_VAR		((grub_efi_char16_t*)"S\0e\0t\0u\0p\0\0\0")
-#define INSYDE_SETUP_VAR_NSIZE		(12)
-#define INSYDE_CUSTOM_VAR		((grub_efi_char16_t*)"C\0u\0s\0t\0o\0m\0\0\0")
-#define INSYDE_CUSTOM_VAR_NSIZE		(14)
+static const grub_efi_char16_t insyde_setup_var[] = { 'S', 'e', 't', 'u', 'p', 0 };
+static const grub_efi_char16_t insyde_custom_var[] = { 'C', 'u', 's', 't', 'o', 'm', 0 };
+#define INSYDE_SETUP_VAR		(insyde_setup_var)
+#define INSYDE_SETUP_VAR_NSIZE		(sizeof (insyde_setup_var))
+#define INSYDE_CUSTOM_VAR		(insyde_custom_var)
+#define INSYDE_CUSTOM_VAR_NSIZE		(sizeof (insyde_custom_var))
 #define INSYDE_SETUP_VAR_SIZE		(0x2bc)
 #define INSYDE_SETUP_VAR_GUID		{ 0xa04a27f4, 0xdf00, 0x4d42, { 0xb5, 0x52, 0x39, 0x51, 0x13, 0x02, 0x11, 0x3d } }
 #define MAX_VARIABLE_SIZE		(1024)
