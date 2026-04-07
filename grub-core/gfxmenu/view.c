@@ -37,6 +37,7 @@
 #include <grub/gui_string_util.h>
 #include <grub/icon_manager.h>
 #include <grub/i18n.h>
+#include <grub/charset.h>
 
 static void
 init_terminal (grub_gfxmenu_view_t view);
@@ -81,7 +82,7 @@ grub_gfxmenu_view_new (const char *theme_path,
   view->terminal_rect.y = view->screen.y + (view->screen.height
                                             - view->terminal_rect.height) / 2;
 
-  default_font = grub_font_get ("Unknown Regular 16");
+  default_font = grub_font_get ("Unifont Regular 16");
   default_fg_color = grub_video_rgba_color_rgb (0, 0, 0);
   default_bg_color = grub_video_rgba_color_rgb (255, 255, 255);
 
@@ -89,7 +90,7 @@ grub_gfxmenu_view_new (const char *theme_path,
 
   view->title_font = default_font;
   view->message_font = default_font;
-  view->terminal_font_name = grub_strdup ("Fixed 10");
+  view->terminal_font_name = grub_strdup ("Unifont Regular 16");
   view->title_color = default_fg_color;
   view->message_color = default_bg_color;
   view->message_bg_color = default_fg_color;
@@ -103,6 +104,16 @@ grub_gfxmenu_view_new (const char *theme_path,
   view->title_text = grub_strdup (_("GRUB Boot Menu"));
   view->progress_message_text = 0;
   view->theme_path = 0;
+
+  /* Animation variables.  */
+  view->is_animation = 0;
+  view->need_refresh = 0;
+  view->point_x = 0;
+  view->point_y = 0;
+  if (grub_env_get (ENGINE_FRAME_SPEED))
+    {
+      view->is_animation = 1;
+    }
 
   /* Set the timeout bar's frame.  */
   view->progress_message_frame.width = view->screen.width * 4 / 5;
@@ -142,6 +153,7 @@ grub_gfxmenu_view_destroy (grub_gfxmenu_view_t view)
   grub_free (view->title_text);
   grub_free (view->progress_message_text);
   grub_free (view->theme_path);
+  grub_free (view->menu_title_offset);
   if (view->canvas)
     view->canvas->component.ops->destroy (view->canvas);
   grub_free (view);
@@ -233,7 +245,7 @@ grub_gfxmenu_print_timeout (int timeout, void *data)
     redraw_timeouts (view);
 }
 
-void
+void 
 grub_gfxmenu_clear_timeout (void *data)
 {
   struct grub_gfxmenu_view *view = data;
@@ -289,6 +301,44 @@ refresh_menu_components (grub_gfxmenu_view_t view)
 }
 
 static void
+refresh_animation_state (grub_gui_component_t component, void *userdata)
+{
+  grub_gfxmenu_view_t view;
+  view = userdata;
+  if (component->ops->is_instance (component, "animation"))
+    {
+      engine_animation_t animation = (engine_animation_t) component;
+      animation->refresh_animation (animation, view);
+    }
+}
+
+static void
+refresh_animation_components (grub_gfxmenu_view_t view)
+{
+  grub_gui_iterate_recursively ((grub_gui_component_t) view->canvas,
+                  refresh_animation_state, view);
+}
+
+static void
+refresh_label_visit (grub_gui_component_t component, void *userdata)
+{
+  grub_gfxmenu_view_t view;
+  view = userdata;
+  if (component->ops->is_instance (component, "label"))
+  {
+    grub_gui_label_t label = (grub_gui_label_t) component;
+    label->refresh_text (label, view);
+  }
+}
+
+static void
+refresh_label_components (grub_gfxmenu_view_t view)
+{
+  grub_gui_iterate_recursively ((grub_gui_component_t) view->canvas,
+                                refresh_label_visit, view);
+}
+
+static void
 draw_message (grub_gfxmenu_view_t view)
 {
   char *text = view->progress_message_text;
@@ -316,7 +366,7 @@ draw_message (grub_gfxmenu_view_t view)
 
 void
 grub_gfxmenu_view_redraw (grub_gfxmenu_view_t view,
-			  const grub_video_rect_t *region)
+                const grub_video_rect_t *region)
 {
   if (grub_video_have_common_points (&view->terminal_rect, region))
     grub_gfxterm_schedule_repaint ();
@@ -359,6 +409,10 @@ grub_gfxmenu_view_draw (grub_gfxmenu_view_t view)
   refresh_menu_components (view);
   update_menu_components (view);
 
+  refresh_animation_components (view);
+
+  refresh_label_components (view);
+
   grub_video_set_area_status (GRUB_VIDEO_AREA_DISABLED);
   grub_gfxmenu_view_redraw (view, &view->screen);
   grub_video_swap_buffers ();
@@ -367,23 +421,6 @@ grub_gfxmenu_view_draw (grub_gfxmenu_view_t view)
       grub_video_set_area_status (GRUB_VIDEO_AREA_DISABLED);
       grub_gfxmenu_view_redraw (view, &view->screen);
     }
-
-}
-
-static void
-redraw_menu_visit (grub_gui_component_t component,
-                   void *userdata)
-{
-  grub_gfxmenu_view_t view;
-  view = userdata;
-  if (component->ops->is_instance (component, "list"))
-    {
-      grub_video_rect_t bounds;
-
-      component->ops->get_bounds (component, &bounds);
-      grub_video_set_area_status (GRUB_VIDEO_AREA_ENABLED);
-      grub_gfxmenu_view_redraw (view, &bounds);
-    }
 }
 
 void
@@ -391,14 +428,37 @@ grub_gfxmenu_redraw_menu (grub_gfxmenu_view_t view)
 {
   update_menu_components (view);
 
-  grub_gui_iterate_recursively ((grub_gui_component_t) view->canvas,
-                                redraw_menu_visit, view);
+  /* Avoid interference.  */
+  if (view->need_refresh)
+    refresh_animation_components (view);
+  refresh_label_components (view);
+
+  grub_video_set_area_status (GRUB_VIDEO_AREA_DISABLED);
+  grub_gfxmenu_view_redraw (view, &view->screen);
   grub_video_swap_buffers ();
   if (view->double_repaint)
-    {
-      grub_gui_iterate_recursively ((grub_gui_component_t) view->canvas,
-				    redraw_menu_visit, view);
-    }
+  {
+    grub_video_set_area_status (GRUB_VIDEO_AREA_DISABLED);
+    grub_gfxmenu_view_redraw (view, &view->screen);
+  }
+}
+
+void
+grub_gfxmenu_set_animation_state (int need_refresh, void *data)
+{
+  grub_gfxmenu_view_t view = data;
+
+  /* Frame rate set by the user.  */
+  view->need_refresh = need_refresh;
+  grub_gfxmenu_redraw_menu (view);
+  view->need_refresh = 0;
+}
+
+void
+grub_gfxmenu_update_screen (void *data)
+{
+  grub_gfxmenu_view_t view = data;
+  grub_gfxmenu_redraw_menu (view);
 }
 
 void
@@ -407,6 +467,55 @@ grub_gfxmenu_set_chosen_entry (int entry, void *data)
   grub_gfxmenu_view_t view = data;
 
   view->selected = entry;
+
+  /* Avoid interference.  */
+  if (!view->is_animation)
+    grub_gfxmenu_redraw_menu (view);
+}
+
+static int
+grub_utf8_get_num_code (const char *src, grub_size_t srcsize)
+{
+  int count = 0;
+  grub_uint32_t code = 0;
+  int num = 0;
+
+  while (srcsize)
+    {
+      if (srcsize != (grub_size_t)-1)
+	srcsize--;
+      if (!grub_utf8_process ((grub_uint8_t)*src++, &code, &count))
+	return 0;
+      if (count != 0)
+	continue;
+      if (code == 0)
+	return num;
+      if (code > GRUB_UNICODE_LAST_VALID)
+	return 0;
+      ++num;
+    }
+
+  return num;
+}
+
+void
+grub_gfxmenu_scroll_chosen_entry (void *data, int diren)
+{
+  grub_gfxmenu_view_t view = data;
+  const char *item_title;
+  int off;
+
+  if (!view->menu->size)
+    return;
+
+  item_title =grub_menu_get_entry (view->menu, view->selected)->title;
+  off = view->menu_title_offset[view->selected] + diren;
+
+  if (off < 0
+      || off > grub_utf8_get_num_code (item_title, grub_strlen(item_title)))
+    return;
+
+  view->menu_title_offset[view->selected] = off;
   grub_gfxmenu_redraw_menu (view);
 }
 
@@ -553,18 +662,12 @@ init_terminal (grub_gfxmenu_view_t view)
 static void
 init_background (grub_gfxmenu_view_t view)
 {
-  struct grub_video_bitmap *scaled_bitmap;
-
-  /*
-   * You don't have to scale a raw image if it's not present. This prevents
-   * setting grub_errno and disrupting a command execution.
-   */
-  if (view->raw_desktop_image == NULL)
-    return;
-
   if (view->scaled_desktop_image)
     return;
+  if (!view->raw_desktop_image)
+    return;
 
+  struct grub_video_bitmap *scaled_bitmap;
   if (view->desktop_image_scale_method ==
       GRUB_VIDEO_BITMAP_SELECTION_METHOD_STRETCH)
     grub_video_bitmap_create_scaled (&scaled_bitmap,
