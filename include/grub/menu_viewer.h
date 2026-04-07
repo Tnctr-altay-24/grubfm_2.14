@@ -33,13 +33,16 @@ struct grub_menu_viewer
   void (*set_chosen_entry) (int entry, void *data);
   void (*print_timeout) (int timeout, void *data);
   void (*clear_timeout) (void *data);
+  void (*scroll_chosen_entry) (void *data, int diren);
+  void (*set_animation_state) (int need_refresh, void *data);
+  void (*update_screen) (void *data);
   void (*fini) (void *fini);
 };
 
 void grub_menu_register_viewer (struct grub_menu_viewer *viewer);
 
 grub_err_t
-grub_menu_try_text (struct grub_term_output *term,
+grub_menu_try_text (struct grub_term_output *term, 
 		    int entry, grub_menu_t menu, int nested);
 
 extern grub_err_t (*grub_gfxmenu_try_hook) (int entry, grub_menu_t menu,
