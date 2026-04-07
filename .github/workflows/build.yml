@@ -11,44 +11,64 @@ jobs:
     steps:
     - name: checkout
       uses: actions/checkout@v4
-    
     - name: initialize
       run: |
         sudo apt-get -y update
         sudo -E apt-get -y install build-essential python3 iasl lzop unifont autopoint bison flex gettext gcc-mingw-w64
-    
     - name: bootstrap
       run: ./bootstrap
 
-    - name: build all targets
+    - name: x86_64-efi configure
+      run: ./configure --prefix=/ --target=x86_64 --with-platform=efi
+    - name: x86_64-efi make
       run: |
-        targets=(
-          "x86_64:efi"
-          "i386:efi"
-          "i386:pc"
-          "i386:multiboot"
-        )
-        
-        for target in "${targets[@]}"; do
-          IFS=':' read -r arch platform <<< "$target"
-          echo "Building $arch-$platform..."
-          ./configure --prefix=/ --target=$arch --with-platform=$platform
           make
           make install DESTDIR=$PWD/PKG
-          make clean
-        done
+    - name: x86_64-efi clean
+      run: make clean
+
+    - name: i386-efi configure
+      run: ./configure --prefix=/ --target=i386 --with-platform=efi
+    - name: i386-efi make
+      run: |
+          make
+          make install DESTDIR=$PWD/PKG
+    - name: i386-efi clean
+      run: make clean
+
+    - name: i386-pc configure
+      run: ./configure --prefix=/ --target=i386 --with-platform=pc
+    - name: i386-pc make
+      run: |
+          make
+          make install DESTDIR=$PWD/PKG
+    - name: i386-pc clean
+      run: make clean
+
+    - name: i386-multiboot configure
+      run: ./configure --prefix=/ --target=i386 --with-platform=multiboot
+    - name: i386-multiboot make
+      run: |
+          make
+          make install DESTDIR=$PWD/PKG
+    - name: i386-multiboot clean
+      run: make clean
+
+#    - name: i386-coreboot configure
+#      run: ./configure --prefix=/ --target=i386 --with-platform=coreboot
+#    - name: i386-coreboot make
+#      run: |
+#        make
+#        make install DESTDIR=$PWD/PKG
+#    - name: i386-coreboot clean
+#      run: make clean
 
     - name: makepkg
       run: ./makepkg.sh
-    
     - name: upload
       uses: marvinpinto/action-automatic-releases@latest
       with:
           repo_token: "${{ secrets.GITHUB_TOKEN }}"
-          automatic_release_tag: "latest"
-          prerelease: false
-          title: "Development Build"
-          files: grub2-latest.tar.gzcrets.GITHUB_TOKEN }}"
           automatic_release_tag: "latest"
           prerelease: false
           title: "Development Build"
