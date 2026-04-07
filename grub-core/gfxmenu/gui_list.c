@@ -24,6 +24,7 @@
 #include <grub/gfxmenu_view.h>
 #include <grub/gfxwidgets.h>
 #include <grub/color.h>
+#include <grub/charset.h>
 
 enum scrollbar_slice_mode {
   SCROLLBAR_SLICE_WEST,
@@ -263,7 +264,7 @@ draw_scrollbar (list_impl_t self,
   int frame_horizontal_pad = (frame->get_left_pad (frame)
                               + frame->get_right_pad (frame));
   unsigned thumb_vertical_pad = (thumb->get_top_pad (thumb)
-				 + thumb->get_bottom_pad (thumb));
+                  + thumb->get_bottom_pad (thumb));
   int thumb_horizontal_pad = (thumb->get_left_pad (thumb)
                               + thumb->get_right_pad (thumb));
   int tracktop = frame->get_top_pad (frame);
@@ -289,17 +290,17 @@ draw_scrollbar (list_impl_t self,
     thumbheight = 1;
   else
     thumbheight = ((unsigned) (tracklen * extent)
-		   / ((unsigned) (max - min))) + 1;
+          / ((unsigned) (max - min))) + 1;
   /* Rare occasion: too many entries or too low height. */
   if (thumbheight < thumb_vertical_pad)
     {
       thumbheight = thumb_vertical_pad;
       if (value <= min || max <= extent
-	  || tracklen <= thumb_vertical_pad)
-	thumby = 0;
+      || tracklen <= thumb_vertical_pad)
+    thumby = 0;
       else
-	thumby = ((unsigned) ((tracklen - thumb_vertical_pad) * (value - min))
-		  / ((unsigned)(max - extent)));
+    thumby = ((unsigned) ((tracklen - thumb_vertical_pad) * (value - min))
+          / ((unsigned)(max - extent)));
     }
   thumby += tracktop;
   int thumbx = frame->get_left_pad (frame);
@@ -312,6 +313,33 @@ draw_scrollbar (list_impl_t self,
                            thumbheight - thumb_vertical_pad);
   frame->draw (frame, 0, 0);
   thumb->draw (thumb, thumbx, thumby);
+}
+
+static const char *
+grub_utf8_offset_code (const char *src, grub_size_t srcsize, int num)
+{
+  int count = 0;
+  grub_uint32_t code = 0;
+
+  while (srcsize && num)
+    {
+      if (srcsize != (grub_size_t)-1)
+    srcsize--;
+      if (!grub_utf8_process ((grub_uint8_t)*src++, &code, &count))
+    return 0;
+      if (count != 0)
+    continue;
+      if (code == 0)
+    return 0;
+      if (code > GRUB_UNICODE_LAST_VALID)
+    return 0;
+      --num;
+    }
+
+  if (!num)
+    return src;
+
+  return 0;
 }
 
 /* Draw the list of items.  */
@@ -352,11 +380,11 @@ draw_menu (list_impl_t self, int num_shown_items)
   struct grub_video_rect oviewport;
 
   grub_video_get_viewport (&oviewport.x, &oviewport.y,
-			   &oviewport.width, &oviewport.height);
-  grub_video_set_viewport (oviewport.x + boxpad,
-			   oviewport.y + boxpad,
-			   oviewport.width - 2 * boxpad,
-			   oviewport.height - 2 * boxpad);
+                &oviewport.width, &oviewport.height);
+  grub_video_set_viewport (oviewport.x + boxpad, 
+                oviewport.y + boxpad,
+                oviewport.width - 2 * boxpad,
+                oviewport.height - 2 * boxpad);
 
   int cwidth = oviewport.width - 2 * boxpad;
 
@@ -411,6 +439,10 @@ draw_menu (list_impl_t self, int num_shown_items)
           top_pad = sel_toppad;
           icon_top_offset = sel_icon_top_offset;
           viewport_width = sel_viewport_width;
+
+          /* Tell the animation point to who.  */
+          self->view->point_x = oviewport.x;
+          self->view->point_y = oviewport.y + item_top + boxpad + sel_box_top_offset;
         }
       else
         {
@@ -433,6 +465,15 @@ draw_menu (list_impl_t self, int num_shown_items)
       const char *item_title =
         grub_menu_get_entry (self->view->menu, menu_index)->title;
 
+      {
+    int off = self->view->menu_title_offset[menu_index];
+    const char *scrolled_title;
+    scrolled_title = grub_utf8_offset_code (item_title,
+                                            grub_strlen (item_title), off);
+    if (scrolled_title)
+      item_title = scrolled_title;
+      }
+
       sviewport.y = item_top + top_pad;
       sviewport.width = viewport_width;
       grub_gui_set_viewport (&sviewport, &svpsave);
@@ -446,9 +487,9 @@ draw_menu (list_impl_t self, int num_shown_items)
       item_top += text_box_height + item_vspace;
     }
   grub_video_set_viewport (oviewport.x,
-			   oviewport.y,
-			   oviewport.width,
-			   oviewport.height);
+                oviewport.y,
+                oviewport.width,
+                oviewport.height);
 }
 
 static void
@@ -477,8 +518,8 @@ list_paint (void *vself, const grub_video_rect_t *region)
     grub_video_rect_t vpsave2, content_rect;
     int num_shown_items = get_num_shown_items (self);
     int drawing_scrollbar = (self->draw_scrollbar
-			     && (num_shown_items < self->view->menu->size)
-			     && check_scrollbar (self));
+                  && (num_shown_items < self->view->menu->size)
+                  && check_scrollbar (self));
     int scrollbar_width = self->scrollbar_width;
 
     content_rect.x = box_left_pad;
@@ -619,10 +660,10 @@ list_get_minimal_size (void *vself, unsigned *width, unsigned *height)
       int max_bottom_pad = grub_max (item_bottom_pad, sel_bottom_pad);
 
       *width = grub_font_get_string_width (self->item_font, "Typical OS");
-      width_s = grub_font_get_string_width (self->selected_item_font,
-					    "Typical OS");
+      width_s = grub_font_get_string_width (self->selected_item_font, "Typical OS");
+
       if (*width < width_s)
-	*width = width_s;
+        *width = width_s;
 
       *width += 2 * boxpad + box_left_pad + box_right_pad
                 + max_left_pad + max_right_pad
@@ -848,7 +889,7 @@ list_set_view_info (void *vself,
 {
   list_impl_t self = vself;
   grub_gfxmenu_icon_manager_set_theme_path (self->icon_manager,
-					    view->theme_path);
+                          view->theme_path);
   self->view = view;
 }
 
@@ -898,7 +939,7 @@ grub_gui_list_new (void)
 
   self->visible = 1;
 
-  default_font = grub_font_get ("Unknown Regular 16");
+  default_font = grub_font_get ("Unifont Regular 16");
   default_fg_color = grub_video_rgba_color_rgb (0, 0, 0);
 
   self->icon_width = 32;
