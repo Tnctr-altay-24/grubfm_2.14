@@ -153,14 +153,14 @@ void
 grubfm_textcat (const char *filename);
 
 /* grubfm ascii art */
-#define GRUBFM_ASCII_ART1 "  _____               _      ______  __  __ "
-#define GRUBFM_ASCII_ART2 " / ____|             | |    |  ____||  \\/  |"
-#define GRUBFM_ASCII_ART3 "| |  __  _ __  _   _ | |__  | |__   | \\  / |"
-#define GRUBFM_ASCII_ART4 "| | |_ || '__|| | | || '_ \\ |  __|  | |\\/| |"
-#define GRUBFM_ASCII_ART5 "| |__| || |   | |_| || |_) || |     | |  | |"
-#define GRUBFM_ASCII_ART6 " \\_____||_|    \\__,_||_.__/ |_|     |_|  |_|"
+#define GRUBFM_ASCII_ART1 "        _     _          __   __ "
+#define GRUBFM_ASCII_ART2 "       | |   | |         \\ \\ / /"
+#define GRUBFM_ASCII_ART3 "  __ _ | |   | |_    __ _ \\_v_/"
+#define GRUBFM_ASCII_ART4 " / _' || |   | __|  / _' | | |"
+#define GRUBFM_ASCII_ART5 "| (_| || |__ | |__ | (_| | | |"
+#define GRUBFM_ASCII_ART6 " \\__,_| \\___| \\___| \\__,_| |_|"
 
-#define GRUBFM_COPYRIGHT  "        Copyright © 2016-2020 a1ive         "
+#define GRUBFM_COPYRIGHT  "  Copyright © 2016-2026 aLTay  "
 
 #define FONT_SPACE 20
 #define FONT_HEIGH 16
